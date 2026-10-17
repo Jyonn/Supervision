@@ -1,0 +1,6 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const el={innerHTML:''};const ctx=vm.createContext({console,document:{getElementById:()=>el,addEventListener(){}},window:{addEventListener(){}},setTimeout(){},sessionStorage:{getItem(){return null},setItem(){}},Date});
+vm.runInContext(fs.readFileSync('markdown.js','utf8'),ctx);vm.runInContext(fs.readFileSync('calendar.js','utf8'),ctx);vm.runInContext(fs.readFileSync('account.js','utf8').replace(/boot\(\);\s*$/,''),ctx);
+vm.runInContext("sessionUser={id:1,name:'本地用户'};activeTask={id:1,title:'任务'};editorState={kind:'report',day:'2026-10-17',owner_id:1,body:'内容'}",ctx);
+for(const page of ['authPage()', 'recordEditor()', 'newTaskPage()', 'groupPageReal()', 'overviewPage()', 'profilePage()', 'gravatarChoices()', 'calendarPage()','availabilityMarkup()']){let html=vm.runInContext(page,ctx);for(const match of html.matchAll(/(?:onclick|oninput|onchange|onkeydown|onsubmit)="([^"]*)"/g)){let code=match[1].replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');try{new Function('event',code)}catch(e){throw Error(page+': invalid inline handler: '+code)}}}
+console.log('PASS: account page rendering and all generated editor/form handlers parse.');
