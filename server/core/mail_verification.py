@@ -6,6 +6,7 @@ import secrets
 import stat
 from datetime import timedelta
 from pathlib import Path
+from django.conf import settings
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from django.contrib.auth.hashers import make_password, check_password
 from django.db import transaction
@@ -13,7 +14,7 @@ from django.utils import timezone
 from django.views.decorators.debug import sensitive_variables
 from .models import EmailChallenge, EmailRateBucket
 
-CONFIG_PATH = Path.home() / '.config/supervision/notificator.private.json'
+CONFIG_PATH = Path(getattr(settings, 'MAIL_CONFIG_PATH', Path.home() / '.config/supervision/notificator.private.json'))
 HOST = 'https://notice.6-79.cn'
 TTL = 600
 
