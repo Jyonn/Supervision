@@ -322,8 +322,8 @@ def preset_avatar(request, preset):
 def friendom_start(request):
     if not settings.FRIENDOM_ENABLED:
         return JsonResponse({'error': 'Frienden 客户端发布尚未验证'}, status=503)
-    if request.get_host() != '127.0.0.1:8001':
-        return HttpResponseRedirect('http://127.0.0.1:8001/api/auth/friendom/start/')
+    if request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
+        return HttpResponseRedirect(settings.FRIENDOM_CALLBACK_URL.replace('/callback/', '/start/'))
     from .friendom import approved_adapter
     destination, pending = approved_adapter().begin()
     pending.update({'expires': time.time() + 300, 'user_id': request.user.pk if request.user.is_authenticated else None})
@@ -335,7 +335,7 @@ def friendom_start(request):
 def friendom_email_start(request):
     if not settings.FRIENDOM_ENABLED or not settings.FRIENDOM_EMAIL_ENABLED:
         return JsonResponse({'error': 'Frienden 邮箱权限尚待服务端上线核验；现有登录不受影响。'}, status=503)
-    if not request.user.is_authenticated or request.get_host() != '127.0.0.1:8001':
+    if not request.user.is_authenticated or request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
         return JsonResponse({'error': '请在本机账号中操作'}, status=403)
     identity = FriendomIdentity.objects.filter(user=request.user).first()
     if not identity:
@@ -359,8 +359,8 @@ def friendom_callback(request):
     # Consume before validation: one callback attempt per pending flow.
     pending = request.session.pop('friendom_pending', None)
     def failure():
-        return HttpResponseRedirect('/?friendom_error=1')
-    if not settings.FRIENDOM_ENABLED or request.get_host() != '127.0.0.1:8001':
+        return HttpResponseRedirect(settings.FRONTEND_ORIGIN + '/?friendom_error=1')
+    if not settings.FRIENDOM_ENABLED or request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
         return failure()
     if not pending or pending.get('expires', 0) < time.time() or request.GET.get('error'):
         return failure()
@@ -385,7 +385,7 @@ def friendom_callback(request):
                 identity.gravatar_email_hash = digest
                 identity.gravatar_email_received_at = timezone.now()
                 identity.save(update_fields=['gravatar_email_hash', 'gravatar_email_received_at'])
-                return HttpResponseRedirect('/app/?friendom_email=ready')
+                return HttpResponseRedirect((settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/') + '?friendom_email=ready')
             if pending.get('user_id') is not None:
                 user = request.user
                 if identity and identity.user_id != user.pk:
@@ -410,6 +410,6 @@ def friendom_callback(request):
                 user.avatar_source = 'friendom'
                 user.save(update_fields=['avatar_source'])
         login(request, user, backend='django.contrib.auth.backends.ModelBackend')
-        return HttpResponseRedirect('/app/')
+        return HttpResponseRedirect(settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/')
     except (FriendomError, IntegrityError, ValueError, KeyError):
         return failure()

@@ -97,9 +97,10 @@ def http_transport(method, url, body, headers):
 
 
 def approved_adapter():
+    from django.conf import settings
     return FriendomAdapter(authorize_page='https://sermo.jyonn.space/oauth/authorize',
                            token_url='https://api.sermo.jyonn.space/users/oauth/token',
                            userinfo_url='https://api.sermo.jyonn.space/users/oauth/userinfo',
-                           client_id='supervision-local',
-                           redirect_uri='http://127.0.0.1:8001/api/auth/friendom/callback/',
+                           client_id=settings.FRIENDOM_CLIENT_ID,
+                           redirect_uri=settings.FRIENDOM_CALLBACK_URL,
                            transport=http_transport)

@@ -39,6 +39,9 @@ CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'
 FRIENDOM_ENABLED = True
 # Public Frienden metadata verified profile email + the exact existing callback.
 FRIENDOM_EMAIL_ENABLED = True
+FRIENDOM_CLIENT_ID = 'supervision-local'
+FRIENDOM_CALLBACK_URL = 'http://127.0.0.1:8001/api/auth/friendom/callback/'
+FRONTEND_ORIGIN = ''
 CHRONELLE_ENABLED = False
 CHRONELLE_AUTH_ENABLED = False
 CHRONELLE_API_ORIGIN = ''

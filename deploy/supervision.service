@@ -1,0 +1,21 @@
+[Unit]
+Description=Supervision API
+After=network.target
+
+[Service]
+User=supervision
+Group=supervision
+WorkingDirectory=/srv/supervision/app/server
+Environment=DJANGO_SETTINGS_MODULE=supervision.production
+EnvironmentFile=/etc/supervision/runtime.env
+ExecStart=/srv/supervision/venv/bin/gunicorn supervision.wsgi:application --bind 127.0.0.1:8051 --workers 1 --threads 2 --timeout 30 --error-logfile -
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/supervision
+
+[Install]
+WantedBy=multi-user.target

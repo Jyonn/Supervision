@@ -33,4 +33,6 @@ if not PRIVATE_DATA_DIR.is_absolute():
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': PRIVATE_DATA_DIR / 'supervision.sqlite3'}}
 CALENDAR_VAULT_DIR = PRIVATE_DATA_DIR / 'calendar-vault'
 FRIENDOM_ENABLED = FRIENDOM_EMAIL_ENABLED = False
+FRIENDOM_CLIENT_ID = os.environ.get('SUPERVISION_FRIENDEN_CLIENT_ID', '')
+FRIENDOM_CALLBACK_URL = PUBLIC_API_ORIGIN + '/api/auth/friendom/callback/'
 CHRONELLE_ENABLED = CHRONELLE_AUTH_ENABLED = False
