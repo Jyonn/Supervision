@@ -32,8 +32,9 @@ def encrypt(value):return cipher(create=True).encrypt(value.encode()).decode()
 @sensitive_variables()
 def token_for(connection):
     from django.utils import timezone
+    from django.db.models import Q
     from .models import CalendarCredential
-    credential=CalendarCredential.objects.filter(connection=connection,expires_at__gt=timezone.now()).first()
+    credential=CalendarCredential.objects.filter(connection=connection).filter(Q(expires_at__isnull=True)|Q(expires_at__gt=timezone.now())).first()
     if not credential or connection.status!='active' or connection.revoked_at:
         raise CalendarError('grant_unavailable')
     try:return cipher().decrypt(credential.ciphertext.encode()).decode()

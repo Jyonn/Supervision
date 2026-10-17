@@ -54,7 +54,7 @@ def begin(request):
     challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
     body={'app_name':'Supervision','app_url':settings.CHRONELLE_APP_URL,'purpose':'研究组会议预约与本人日历事件管理；组员可见范围另行选择',
         'code_challenge':challenge,'code_challenge_method':'S256','redirect_uri':settings.CHRONELLE_CALLBACK_URL,
-        'state':state,'scopes':list(SCOPES),'all_groups':False,'max_expiry_days':30}
+        'state':state,'scopes':list(SCOPES),'all_groups':False,'max_expiry_days':None}
     status,data=transport('POST','/api/delegated-authorizations/requests/',body,{})
     try:
         request_id=str(uuid.UUID(data['request_id']))
@@ -101,10 +101,12 @@ def claim(request,callback=None):
         CalendarAuthorizationAttempt.objects.filter(pk=attempt.pk,status='claiming').update(status='failed')
         raise CalendarError('denied' if status==403 else 'claim_unavailable')
     try:
-        token=data['token'];grant=data['grant'];scopes=grant['scopes'];expires=parse_datetime(grant['expires_at'])
+        token=data['token'];grant=data['grant'];scopes=grant['scopes'];raw_expiry=grant['expires_at']
+        expires=parse_datetime(raw_expiry) if raw_expiry is not None else None
         if (data.get('status')!='approved' or data.get('token_type')!='Bearer' or not isinstance(token,str) or not re.fullmatch(r'cdg_[A-Za-z0-9_-]{43}',token)
             or not secrets.compare_digest(data.get('state',''),pending['state']) or not isinstance(scopes,list)
-            or 'calendar.identity.read' not in scopes or not set(scopes)<=set(SCOPES) or not expires or timezone.is_naive(expires) or expires<=timezone.now()
+            or 'calendar.identity.read' not in scopes or not set(scopes)<=set(SCOPES)
+            or raw_expiry is not None and (not expires or timezone.is_naive(expires) or expires<=timezone.now())
             or grant.get('paused') or grant.get('revoked') or grant.get('all_groups') is not False):raise ValueError
         identity_status,identity=transport('GET','/api/delegated/v1/identity/',None,{'Authorization':'Bearer '+token})
         if identity_status!=200 or not isinstance(identity.get('subject'),str) or not re.fullmatch(r'[1-9][0-9]*',identity['subject']):raise ValueError

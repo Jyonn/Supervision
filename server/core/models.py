@@ -81,7 +81,7 @@ class CalendarCredential(models.Model):
     connection = models.OneToOneField(CalendarConnection, on_delete=models.CASCADE)
     ciphertext = models.TextField()
     grant_id = models.CharField(max_length=64)
-    expires_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True, blank=True)
     group_ids = models.JSONField(default=list)
 
 class CalendarAuthorizationAttempt(models.Model):

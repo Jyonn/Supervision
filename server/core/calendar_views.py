@@ -50,6 +50,8 @@ def connection(request):
     pending=request.session.get('calendar_pending')
     return Response({'status':value.status if value else 'disconnected','capabilities':value.capabilities if value and value.status=='active' else [],
         'provider_ready':settings.CHRONELLE_ENABLED,'auth_ready':configured(),'pending':bool(pending),
+        'grant_expires_at':credential.expires_at if credential else None,
+        'grant_permanent':bool(credential and credential.expires_at is None),
         'event_group_id':value.event_group_id if value else None,'available_group_ids':credential.group_ids if credential else [],'remote_revocation_supported':False})
 
 @api_view(['POST'])

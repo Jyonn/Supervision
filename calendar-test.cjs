@@ -19,7 +19,10 @@ assert.equal(vm.runInContext('calendarState.availability.suggestions.length',con
 assert.match(html,/所有读写仅内存模拟/);
 const settingsMarkup=vm.runInContext('calendarSettings()',context);
 assert.match(settingsMarkup,/选定的类别组/);
-assert.match(settingsMarkup,/最长30天/);
+assert.match(settingsMarkup,/至少30天/);
+assert.match(settingsMarkup,/本人明确选择永久/);
+assert.match(settingsMarkup,/旧授权不会自动续期/);
+assert.doesNotMatch(settingsMarkup,/最长30天/);
 assert.match(settingsMarkup,/不发送参会者邀请/);
 console.log('PASS: isolated calendar preview loads, forms/handlers parse, unknown availability prevents free-slot claims.');
 })().catch(error=>{console.error(error);process.exitCode=1});

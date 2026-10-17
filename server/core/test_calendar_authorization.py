@@ -5,6 +5,8 @@ from unittest.mock import patch
 from django.test import TestCase,Client,override_settings
 from django.utils import timezone
 from .models import User,CalendarCredential,CalendarAuthorizationAttempt
+from .calendar_vault import token_for
+from .calendar_adapter import CalendarError
 from .calendar_authorization import SCOPES
 from .middleware import OAuthLogRedaction
 
@@ -35,7 +37,7 @@ class CalendarAuthorizationTests(TestCase):
         self.assertEqual(self.captured['code_challenge'],expected);self.assertEqual(self.captured['code_challenge_method'],'S256')
         self.assertNotIn('token',result.json());self.assertNotIn('verifier',result.content.decode());self.assertFalse(CalendarCredential.objects.exists())
         self.assertEqual(self.captured['all_groups'],False)
-        self.assertEqual(self.captured['max_expiry_days'],30)
+        self.assertIsNone(self.captured['max_expiry_days'])
         self.assertFalse(any('invitations' in scope for scope in self.captured['scopes']))
         self.assertEqual(self.post('/api/calendar/authorization/start/',{'consent':True}).status_code,409)
     def test_claim_encryption_identity_and_single_use(self):
@@ -44,6 +46,38 @@ class CalendarAuthorizationTests(TestCase):
         credential=CalendarCredential.objects.get();self.assertNotIn(self.token,credential.ciphertext);self.assertEqual(credential.connection.provider_subject,'9');self.assertFalse(self.user.email)
         self.assertEqual((Path(self.directory.name)/'vault/key').stat().st_mode&0o777,0o600)
         calls=self.mock.call_count;self.assertEqual(self.post('/api/calendar/authorization/claim/').status_code,409);self.assertEqual(self.mock.call_count,calls)
+    def test_explicit_null_expiry_is_permanent_not_missing_field(self):
+        self.begin();original=self.transport
+        def permanent(method,path,body=None,headers=None):
+            status,data=original(method,path,body,headers)
+            if path.endswith('/claim/'):data['grant']['expires_at']=None
+            return status,data
+        self.mock.side_effect=permanent
+        self.assertEqual(self.post('/api/calendar/authorization/claim/').json(),{'connected':True})
+        credential=CalendarCredential.objects.get()
+        self.assertIsNone(credential.expires_at)
+        self.assertEqual(token_for(credential.connection),self.token)
+        public=self.client.get('/api/calendar/connection/').json()
+        self.assertIsNone(public['grant_expires_at'])
+        self.assertTrue(public['grant_permanent'])
+        self.assertNotIn(self.token,str(public))
+        self.assertLessEqual(self.client.session.get('calendar_pending',{}).get('expires',0),timezone.now().timestamp()+600)
+    def test_missing_expiry_is_rejected_not_assumed_permanent(self):
+        self.begin();original=self.transport
+        def missing(method,path,body=None,headers=None):
+            status,data=original(method,path,body,headers)
+            if path.endswith('/claim/'):data['grant'].pop('expires_at')
+            return status,data
+        self.mock.side_effect=missing
+        self.assertEqual(self.post('/api/calendar/authorization/claim/').status_code,409)
+        self.assertFalse(CalendarCredential.objects.exists())
+    def test_existing_expired_credential_is_never_extended(self):
+        self.begin();self.post('/api/calendar/authorization/claim/')
+        credential=CalendarCredential.objects.get()
+        expired=timezone.now()-timedelta(days=1)
+        credential.expires_at=expired;credential.save(update_fields=['expires_at'])
+        with self.assertRaises(CalendarError):token_for(credential.connection)
+        credential.refresh_from_db();self.assertEqual(credential.expires_at,expired)
     def test_cancel_and_late_claim_race(self):
         self.begin();self.post('/api/calendar/authorization/cancel/');calls=self.mock.call_count
         self.assertEqual(self.post('/api/calendar/authorization/claim/').status_code,409);self.assertEqual(self.mock.call_count,calls)
