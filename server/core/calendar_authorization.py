@@ -52,7 +52,7 @@ def begin(request):
     if existing and existing.get('expires',0)>time.time():raise CalendarError('attempt_pending')
     verifier=secrets.token_urlsafe(48);state=secrets.token_urlsafe(32)
     challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
-    body={'app_name':'Supervision','app_url':settings.CHRONELLE_APP_URL,'purpose':'研究组会议预约与本人日历事件管理；组员可见范围另行选择',
+    body={'app_name':'板凳 · Abandon','app_url':settings.CHRONELLE_APP_URL,'purpose':'研究组会议预约与本人日历事件管理；组员可见范围另行选择',
         'code_challenge':challenge,'code_challenge_method':'S256','redirect_uri':settings.CHRONELLE_CALLBACK_URL,
         'state':state,'scopes':list(SCOPES),'all_groups':False,'max_expiry_days':None}
     status,data=transport('POST','/api/delegated-authorizations/requests/',body,{})

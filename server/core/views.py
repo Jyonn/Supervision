@@ -265,11 +265,12 @@ def task_detail(request, task_id):
     entry, _ = Entry.objects.update_or_create(task=task, owner_id=owner_id, kind=kind, day=day, defaults={'body': body})
     return Response({'id': entry.id, 'saved': True})
 
-ASSETS = {'runtime.js', 'ui.js', 'ui.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg'}
+BRAND_ASSETS = {'abandon.svg','favicon-16.png','favicon-32.png','favicon.ico','apple-touch-icon.png','icon-192.png','icon-512.png','icon-maskable-512.png'}
+ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'ui.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg'}
 def asset(request, filename):
     if filename not in ASSETS:
         raise Http404
-    return FileResponse((settings.BASE_DIR / filename).open('rb'))
+    return FileResponse((settings.BASE_DIR / ('brand' if filename in BRAND_ASSETS else '') / filename).open('rb'))
 
 def landing(request):
     return FileResponse((settings.BASE_DIR / 'account.html').open('rb'))
