@@ -116,6 +116,27 @@ class CalendarAuthorizationTests(TestCase):
         result=self.client.get('/api/calendar/authorization/callback/',params,secure=True,HTTP_HOST='supervision.example.test')
         self.assertEqual(result.url,'/app/?calendar_connected=1');self.assertTrue(CalendarCredential.objects.exists())
         self.assertIn('calendar_error',self.client.get('/api/calendar/authorization/callback/',params,secure=True,HTTP_HOST='supervision.example.test').url)
+    @override_settings(CHRONELLE_CALLBACK_URL='https://supervision.example.test/api/calendar/authorization/callback/')
+    def test_callback_after_background_claim_acknowledges_once_without_reclaim(self):
+        self.begin();pending=self.client.session['calendar_pending']
+        self.assertEqual(self.post('/api/calendar/authorization/claim/').status_code,200)
+        calls=self.mock.call_count
+        params={'request_id':self.request_id,'state':'incorrect','status':'approved'}
+        self.assertIn('calendar_error',self.client.get('/api/calendar/authorization/callback/',params,secure=True,HTTP_HOST='supervision.example.test').url)
+        params['state']=pending['state']
+        self.assertIn('calendar_connected',self.client.get('/api/calendar/authorization/callback/',params,secure=True,HTTP_HOST='supervision.example.test').url)
+        self.assertEqual(self.mock.call_count,calls)
+        self.assertIn('calendar_error',self.client.get('/api/calendar/authorization/callback/',params,secure=True,HTTP_HOST='supervision.example.test').url)
+    @override_settings(CHRONELLE_CALLBACK_URL='https://supervision.example.test/api/calendar/authorization/callback/')
+    def test_callback_during_claim_returns_pending_without_second_provider_call(self):
+        self.begin();pending=self.client.session['calendar_pending']
+        CalendarAuthorizationAttempt.objects.update(status='claiming')
+        calls=self.mock.call_count
+        params={'request_id':self.request_id,'state':pending['state'],'status':'approved'}
+        result=self.client.get('/api/calendar/authorization/callback/',params,secure=True,HTTP_HOST='supervision.example.test')
+        self.assertIn('calendar_pending',result.url)
+        self.assertEqual(self.mock.call_count,calls)
+        self.assertFalse(CalendarCredential.objects.exists())
     def test_denial_expiry_and_legacy_key_rejected(self):
         self.begin();self.mock.side_effect=lambda *args:(403,None)
         self.assertEqual(self.post('/api/calendar/authorization/claim/').status_code,409)

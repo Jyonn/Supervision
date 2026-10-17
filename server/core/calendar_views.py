@@ -96,7 +96,7 @@ def authorization_cancel(request):
 
 def authorization_callback(request):
     from django.http import HttpResponseRedirect
-    from .calendar_authorization import claim
+    from .calendar_authorization import claim,completed_callback
     frontend=getattr(settings,'FRONTEND_ORIGIN','')
     destination=frontend+'/' if frontend else '/app/'
     if request.method!='GET' or not request.user.is_authenticated:
@@ -104,8 +104,18 @@ def authorization_callback(request):
     configured_callback=settings.CHRONELLE_CALLBACK_URL
     if not configured_callback or request.build_absolute_uri().split('?')[0]!=configured_callback or set(request.GET)!={'request_id','state','status'} or any(len(request.GET.getlist(k))!=1 for k in request.GET):
         return HttpResponseRedirect(destination+'?calendar_error=callback')
-    try:claim(request,callback={k:request.GET[k] for k in request.GET})
-    except CalendarError:return HttpResponseRedirect(destination+'?calendar_error=claim')
+    parameters={k:request.GET[k] for k in request.GET}
+    if completed_callback(request,parameters):return HttpResponseRedirect(destination+'?calendar_connected=1')
+    try:claim(request,callback=parameters)
+    except CalendarError as error:
+        if error.code in ['attempt_unavailable','poll_wait']:
+            pending=request.session.get('calendar_pending')
+            import secrets
+            if pending and parameters['request_id']==pending.get('request_id') and secrets.compare_digest(parameters['state'],pending.get('state','')) and parameters['status']=='approved':
+                attempt=CalendarAuthorizationAttempt.objects.filter(request_id=pending['request_id'],user=request.user).first()
+                if attempt and attempt.status=='claiming':return HttpResponseRedirect(destination+'?calendar_pending=1')
+        return HttpResponseRedirect(destination+'?calendar_error=claim')
+    request.session.pop('calendar_completed_return',None)
     return HttpResponseRedirect(destination+'?calendar_connected=1')
 
 @api_view(['GET','PATCH'])

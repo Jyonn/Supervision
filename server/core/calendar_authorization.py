@@ -50,6 +50,7 @@ def begin(request,include_metadata=False):
     if not configured():raise CalendarError('not_configured')
     existing=request.session.get('calendar_pending')
     if existing and existing.get('expires',0)>time.time():raise CalendarError('attempt_pending')
+    request.session.pop('calendar_completed_return',None)
     verifier=secrets.token_urlsafe(48);state=secrets.token_urlsafe(32)
     challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
     scopes=list(SCOPES)+(['calendar.categories.read'] if include_metadata is True else [])
@@ -129,7 +130,20 @@ def claim(request,callback=None):
         connection.save()
         CalendarCredential.objects.update_or_create(connection=connection,defaults={'ciphertext':ciphertext,'grant_id':grant_id,'expires_at':expires,'group_ids':groups})
         attempt.status='completed';attempt.save(update_fields=['status'])
+    request.session['calendar_completed_return']={'request_id':pending['request_id'],'state_digest':hashlib.sha256(pending['state'].encode()).hexdigest(),'grant_id':grant_id,'expires':pending['expires']}
     return {'connected':True}
+
+@sensitive_variables()
+def completed_callback(request,parameters):
+    receipt=request.session.get('calendar_completed_return')
+    if not receipt or parameters.get('status')!='approved' or receipt.get('expires',0)<=time.time():return False
+    if parameters.get('request_id')!=receipt.get('request_id') or not secrets.compare_digest(hashlib.sha256(parameters.get('state','').encode()).hexdigest(),receipt.get('state_digest','')):return False
+    from django.db.models import Q
+    if not CalendarAuthorizationAttempt.objects.filter(request_id=receipt['request_id'],user=request.user,status='completed').exists():return False
+    valid=CalendarCredential.objects.filter(connection__user=request.user,connection__status='active',connection__revoked_at__isnull=True,grant_id=receipt['grant_id']).filter(Q(expires_at__isnull=True)|Q(expires_at__gt=timezone.now())).exists()
+    if not valid:return False
+    request.session.pop('calendar_completed_return',None);request.session.pop('calendar_pending',None)
+    return True
 
 @sensitive_variables()
 def private_transport(connection,method,path,body,headers):
