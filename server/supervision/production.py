@@ -33,7 +33,8 @@ if not PRIVATE_DATA_DIR.is_absolute():
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': PRIVATE_DATA_DIR / 'supervision.sqlite3'}}
 CALENDAR_VAULT_DIR = PRIVATE_DATA_DIR / 'calendar-vault'
 MAIL_CONFIG_PATH = Path('/etc/supervision/notificator.private.json')
-FRIENDOM_ENABLED = FRIENDOM_EMAIL_ENABLED = False
 FRIENDOM_CLIENT_ID = os.environ.get('SUPERVISION_FRIENDEN_CLIENT_ID', '')
 FRIENDOM_CALLBACK_URL = PUBLIC_API_ORIGIN + '/api/auth/friendom/callback/'
+FRIENDOM_ENABLED = os.environ.get('SUPERVISION_FRIENDEN_ENABLED') == '1' and FRIENDOM_CLIENT_ID == 'supervision-web'
+FRIENDOM_EMAIL_ENABLED = FRIENDOM_ENABLED
 CHRONELLE_ENABLED = CHRONELLE_AUTH_ENABLED = False
