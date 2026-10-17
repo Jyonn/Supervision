@@ -40,7 +40,7 @@ def user_json(user):
 
 @require_http_methods(['GET'])
 def session(request):
-    return JsonResponse({'user': user_json(request.user) if request.user.is_authenticated else None, 'csrf': get_token(request), 'email_verification': mail_verification.ready(), 'email_verification_required': settings.EMAIL_VERIFICATION_REQUIRED, 'password_recovery': False, 'external_identity': settings.FRIENDOM_ENABLED, 'friendom_email': settings.FRIENDOM_EMAIL_ENABLED, 'calendar_local': True})
+    return JsonResponse({'user': user_json(request.user) if request.user.is_authenticated else None, 'csrf': get_token(request), 'email_verification': mail_verification.ready(), 'email_verification_required': settings.EMAIL_VERIFICATION_REQUIRED, 'password_recovery': False, 'external_identity': settings.FRIENDOM_ENABLED, 'friendom_email': settings.FRIENDOM_EMAIL_ENABLED, 'calendar_local': True, 'calendar_authorization': settings.CHRONELLE_AUTH_ENABLED, 'calendar_sync': settings.CHRONELLE_ENABLED})
 
 @csrf_protect
 @require_http_methods(['POST'])
