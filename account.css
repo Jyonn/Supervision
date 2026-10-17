@@ -8,3 +8,4 @@
 .calendar-range input{min-width:0;box-sizing:border-box}.calendar-heading{flex-wrap:wrap;gap:12px}.calendar-heading select{max-width:100%}@media(max-width:760px){.calendar-range{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}.calendar-range label{min-width:0}.calendar-range button{justify-self:start}.calendar-range input{min-inline-size:0;max-width:100%;font-size:13px}.calendar-layout aside{padding:12px 0}.calendar-layout{gap:10px;margin-top:20px}}
 
 .brand .brand-icon{width:30px;height:30px;flex:none}.brand .brand-name{display:flex;align-items:baseline;gap:8px}.brand .brand-name small{font-size:12px;font-weight:500;color:#756e62}.brand-slogan{font-size:13px;line-height:1.6;color:#756e62;margin:10px 0 22px}
+.auth-box .brand{display:flex;align-items:center;gap:10px}
