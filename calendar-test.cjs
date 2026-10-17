@@ -17,5 +17,9 @@ await vm.runInContext("api('groups/1/calendar/availability/?start=test').then(va
 assert.match(el.innerHTML,/未知/);assert.doesNotMatch(el.innerHTML,/calendar-slot/);
 assert.equal(vm.runInContext('calendarState.availability.suggestions.length',context),0);
 assert.match(html,/所有读写仅内存模拟/);
+const settingsMarkup=vm.runInContext('calendarSettings()',context);
+assert.match(settingsMarkup,/选定的类别组/);
+assert.match(settingsMarkup,/最长30天/);
+assert.match(settingsMarkup,/不发送参会者邀请/);
 console.log('PASS: isolated calendar preview loads, forms/handlers parse, unknown availability prevents free-slot claims.');
 })().catch(error=>{console.error(error);process.exitCode=1});

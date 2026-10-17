@@ -34,6 +34,9 @@ class CalendarAuthorizationTests(TestCase):
         expected=base64.urlsafe_b64encode(hashlib.sha256(pending['verifier'].encode()).digest()).rstrip(b'=').decode()
         self.assertEqual(self.captured['code_challenge'],expected);self.assertEqual(self.captured['code_challenge_method'],'S256')
         self.assertNotIn('token',result.json());self.assertNotIn('verifier',result.content.decode());self.assertFalse(CalendarCredential.objects.exists())
+        self.assertEqual(self.captured['all_groups'],False)
+        self.assertEqual(self.captured['max_expiry_days'],30)
+        self.assertFalse(any('invitations' in scope for scope in self.captured['scopes']))
         self.assertEqual(self.post('/api/calendar/authorization/start/',{'consent':True}).status_code,409)
     def test_claim_encryption_identity_and_single_use(self):
         self.begin();result=self.post('/api/calendar/authorization/claim/')
@@ -79,3 +82,22 @@ class CalendarAuthorizationTests(TestCase):
         with override_settings(CHRONELLE_AUTH_ENABLED=False):self.assertEqual(self.post('/api/calendar/authorization/start/',{'consent':True}).status_code,503)
         record=logging.LogRecord('django.server',20,'',1,'"%s"',('GET /api/calendar/authorization/callback/?state=private&request_id=private HTTP/1.1',),None)
         OAuthLogRedaction().filter(record);self.assertNotIn('state=',record.getMessage());self.assertNotIn('request_id=',record.getMessage())
+    @override_settings(FRONTEND_ORIGIN='https://supervision.qijiong.work',CHRONELLE_CALLBACK_URL='https://supervision.example.test/api/calendar/authorization/callback/')
+    def test_production_callback_returns_to_fixed_frontend_without_secrets(self):
+        self.begin();pending=self.client.session['calendar_pending']
+        params={'request_id':self.request_id,'state':pending['state'],'status':'approved'}
+        result=self.client.get('/api/calendar/authorization/callback/',params,secure=True,HTTP_HOST='supervision.example.test')
+        self.assertEqual(result.url,'https://supervision.qijiong.work/?calendar_connected=1')
+        self.assertNotIn(self.token,result.url)
+        self.assertNotIn(pending['state'],result.url)
+        self.assertNotIn(self.request_id,result.url)
+    @override_settings(FRONTEND_ORIGIN='https://supervision.qijiong.work',CHRONELLE_CALLBACK_URL='https://supervision.example.test/api/calendar/authorization/callback/')
+    def test_production_denial_and_logged_out_return_to_fixed_frontend(self):
+        self.begin();pending=self.client.session['calendar_pending']
+        params={'request_id':self.request_id,'state':pending['state'],'status':'denied'}
+        result=self.client.get('/api/calendar/authorization/callback/',params,secure=True,HTTP_HOST='supervision.example.test')
+        self.assertEqual(result.url,'https://supervision.qijiong.work/?calendar_error=claim')
+        self.assertFalse(CalendarCredential.objects.exists())
+        self.client.logout()
+        result=self.client.get('/api/calendar/authorization/callback/',{'next':'https://evil.example'},secure=True,HTTP_HOST='supervision.example.test')
+        self.assertEqual(result.url,'https://supervision.qijiong.work/?calendar_error=login')

@@ -1,6 +1,28 @@
 from django.test import TestCase, Client, override_settings
+from django.core.exceptions import ImproperlyConfigured
+from supervision.deployment_config import chronelle_config
 
 ORIGIN = 'https://supervision.qijiong.work'
+
+class ChronelleProductionConfigTests(TestCase):
+    def environment(self):
+        return {'SUPERVISION_CHRONELLE_AUTH_ENABLED':'1','SUPERVISION_CHRONELLE_ENABLED':'1',
+            'SUPERVISION_CHRONELLE_API_ORIGIN':'https://api.chronelle.jyonn.space',
+            'SUPERVISION_CHRONELLE_AUTHORIZE_ORIGIN':'https://chronelle.jyonn.space',
+            'SUPERVISION_CHRONELLE_APP_URL':'https://api.supervision.qijiong.work',
+            'SUPERVISION_CHRONELLE_CALLBACK_URL':'https://api.supervision.qijiong.work/api/calendar/authorization/callback/'}
+    def test_default_off_and_exact_complete_configuration(self):
+        self.assertFalse(chronelle_config({})['CHRONELLE_AUTH_ENABLED'])
+        self.assertFalse(chronelle_config({})['CHRONELLE_ENABLED'])
+        self.assertTrue(chronelle_config(self.environment())['CHRONELLE_ENABLED'])
+    def test_missing_mismatched_or_redirected_origin_fails_closed(self):
+        for key in ['SUPERVISION_CHRONELLE_API_ORIGIN','SUPERVISION_CHRONELLE_AUTHORIZE_ORIGIN','SUPERVISION_CHRONELLE_APP_URL','SUPERVISION_CHRONELLE_CALLBACK_URL']:
+            for value in ['', 'https://evil.example',self.environment()[key]+'?next=untrusted']:
+                data={**self.environment(),key:value}
+                with self.assertRaises(ImproperlyConfigured):chronelle_config(data)
+    def test_sync_requires_authorization_and_strict_boolean(self):
+        with self.assertRaises(ImproperlyConfigured):chronelle_config({'SUPERVISION_CHRONELLE_ENABLED':'1'})
+        with self.assertRaises(ImproperlyConfigured):chronelle_config({'SUPERVISION_CHRONELLE_AUTH_ENABLED':'true'})
 
 @override_settings(CORS_ALLOWED_ORIGINS=[ORIGIN], CSRF_TRUSTED_ORIGINS=[ORIGIN],
                    MIDDLEWARE=['core.middleware.ExactOriginCors',

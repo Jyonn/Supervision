@@ -37,4 +37,5 @@ FRIENDOM_CLIENT_ID = os.environ.get('SUPERVISION_FRIENDEN_CLIENT_ID', '')
 FRIENDOM_CALLBACK_URL = PUBLIC_API_ORIGIN + '/api/auth/friendom/callback/'
 FRIENDOM_ENABLED = os.environ.get('SUPERVISION_FRIENDEN_ENABLED') == '1' and FRIENDOM_CLIENT_ID == 'supervision-web'
 FRIENDOM_EMAIL_ENABLED = FRIENDOM_ENABLED
-CHRONELLE_ENABLED = CHRONELLE_AUTH_ENABLED = False
+from .deployment_config import chronelle_config
+globals().update(chronelle_config(os.environ))

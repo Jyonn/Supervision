@@ -78,14 +78,16 @@ def authorization_cancel(request):
 def authorization_callback(request):
     from django.http import HttpResponseRedirect
     from .calendar_authorization import claim
+    frontend=getattr(settings,'FRONTEND_ORIGIN','')
+    destination=frontend+'/' if frontend else '/app/'
     if request.method!='GET' or not request.user.is_authenticated:
-        return HttpResponseRedirect('/?calendar_error=login')
+        return HttpResponseRedirect((frontend+'/' if frontend else '/')+'?calendar_error=login')
     configured_callback=settings.CHRONELLE_CALLBACK_URL
     if not configured_callback or request.build_absolute_uri().split('?')[0]!=configured_callback or set(request.GET)!={'request_id','state','status'} or any(len(request.GET.getlist(k))!=1 for k in request.GET):
-        return HttpResponseRedirect('/app/?calendar_error=callback')
+        return HttpResponseRedirect(destination+'?calendar_error=callback')
     try:claim(request,callback={k:request.GET[k] for k in request.GET})
-    except CalendarError:return HttpResponseRedirect('/app/?calendar_error=claim')
-    return HttpResponseRedirect('/app/?calendar_connected=1')
+    except CalendarError:return HttpResponseRedirect(destination+'?calendar_error=claim')
+    return HttpResponseRedirect(destination+'?calendar_connected=1')
 
 @api_view(['GET','PATCH'])
 def sharing(request,group_id):
