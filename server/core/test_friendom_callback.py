@@ -2,6 +2,7 @@ import logging
 import secrets
 import time
 from unittest.mock import patch, Mock
+from urllib.parse import parse_qs, urlsplit
 from django.test import TestCase, Client, override_settings
 from .models import User, FriendomIdentity
 from .middleware import OAuthLogRedaction
@@ -23,6 +24,33 @@ class FriendomCallbackTests(TestCase):
         self.assertIn('scope=profile', r.url)
         self.assertNotIn('scope=phone', r.url)
         self.assertGreater(self.client.session['friendom_pending']['expires'], time.time())
+        self.assertEqual(parse_qs(urlsplit(r.url).query)['scope'], ['profile email'])
+    @override_settings(FRIENDOM_EMAIL_ENABLED=False)
+    def test_profile_only_registration_and_pending_remain_compatible(self):
+        r=self.client.get('/api/auth/friendom/start/', **self.host)
+        self.assertEqual(parse_qs(urlsplit(r.url).query)['scope'], ['profile'])
+    @patch('core.friendom.http_transport')
+    def test_normal_login_email_hash_saved_without_email_merge_or_gravatar_selection(self, transport):
+        User.objects.create_user(username='local-email',email='same@example.test')
+        for index, (email, verified) in enumerate([('same@example.test',True),(None,True),('bad',True),('same@example.test',False)]):
+            self.client.logout()
+            pending=self.begin()
+            transport.side_effect=[{'access_token':'synthetic-token','token_type':'Bearer','scope':'profile email'},
+                {'sub':f'sermo:1:{99+index}','nickname':'Synthetic','email':email,'email_verified':verified}]
+            self.assertEqual(self.callback(pending).url,'/app/')
+            identity=FriendomIdentity.objects.get(subject=f'sermo:1:{99+index}')
+            self.assertIsNone(identity.user.email)
+            self.assertIsNone(identity.user.email_verified_at)
+            self.assertNotEqual(identity.user.avatar_source,'gravatar')
+            self.assertEqual(User.objects.count(),2+index)
+            self.assertEqual(len(identity.gravatar_email_hash),64 if index==0 else 0)
+    @patch('core.friendom.http_transport')
+    def test_denial_does_not_retry_or_contact_provider(self, transport):
+        pending=self.begin()
+        response=self.client.get('/api/auth/friendom/callback/',{'error':'access_denied','state':pending['state']},**self.host)
+        self.assertIn('friendom_error',response.url)
+        self.assertNotIn('friendom_pending',self.client.session)
+        transport.assert_not_called()
     @patch('core.friendom.approved_adapter')
     def test_valid_callback_creates_unusable_password_account_without_email_merge(self, factory):
         existing=User.objects.create_user(username='existing', email='local@example.test')

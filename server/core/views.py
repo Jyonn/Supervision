@@ -325,7 +325,7 @@ def friendom_start(request):
     if request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
         return HttpResponseRedirect(settings.FRIENDOM_CALLBACK_URL.replace('/callback/', '/start/'))
     from .friendom import approved_adapter
-    destination, pending = approved_adapter().begin()
+    destination, pending = approved_adapter().begin(scopes=('profile', 'email') if settings.FRIENDOM_EMAIL_ENABLED else ('profile',))
     pending.update({'expires': time.time() + 300, 'user_id': request.user.pk if request.user.is_authenticated else None})
     request.session['friendom_pending'] = pending
     return HttpResponseRedirect(destination)
@@ -409,6 +409,11 @@ def friendom_callback(request):
             if profile['avatar_url']:
                 user.avatar_source = 'friendom'
                 user.save(update_fields=['avatar_source'])
+        digest = profile.get('gravatar_email_hash', '')
+        if 'email' in pending.get('scopes', []) and len(digest) == 64 and all(c in '0123456789abcdef' for c in digest):
+            identity.gravatar_email_hash = digest
+            identity.gravatar_email_received_at = timezone.now()
+            identity.save(update_fields=['gravatar_email_hash', 'gravatar_email_received_at'])
         login(request, user, backend='django.contrib.auth.backends.ModelBackend')
         return HttpResponseRedirect(settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/')
     except (FriendomError, IntegrityError, ValueError, KeyError):
