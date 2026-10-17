@@ -3,8 +3,8 @@ Description=Supervision API
 After=network.target
 
 [Service]
-User=supervision
-Group=supervision
+User=ubuntu
+Group=ubuntu
 WorkingDirectory=/srv/supervision/app/server
 Environment=DJANGO_SETTINGS_MODULE=supervision.production
 EnvironmentFile=/etc/supervision/runtime.env
