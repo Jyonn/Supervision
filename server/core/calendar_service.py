@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.db import transaction
 from django.utils import timezone
 from .models import CalendarConnection, CalendarSharing, ResearchMeeting, MeetingCalendarLink, MeetingSyncOperation
+from .user_profiles import public_user_json
 from .calendar_adapter import CalendarError, CalendarWriteResult, calendar_adapter
 
 def interval(start, end, zone='UTC', maximum_days=31):
@@ -27,7 +28,7 @@ def group_availability(group, start, end, adapter=None):
         user = member.user
         connection = CalendarConnection.objects.filter(user=user, status='active', revoked_at__isnull=True).first()
         sharing = CalendarSharing.objects.filter(user=user, group=group).first()
-        row = {'user_id': user.pk, 'name': user.first_name or '组员', 'state': 'unknown', 'reason': 'not_shared', 'busy': []}
+        row = {**public_user_json(user), 'user_id': user.pk, 'state': 'unknown', 'reason': 'not_shared', 'busy': [], 'all_day': []}
         if connection and sharing and sharing.visibility in ['busy', 'details']:
             try:
                 detail = sharing.visibility == 'details'
@@ -42,12 +43,21 @@ def group_availability(group, start, end, adapter=None):
                     a,b = max(a,start), min(b,end)
                     if b <= a:
                         continue
-                    item = {'start': a.isoformat(), 'end': b.isoformat()}
+                    item = {'start': a.isoformat(), 'end': b.isoformat(), 'all_day': block.get('all_day') is True}
+                    if item['all_day']:
+                        for field in ('start_date', 'end_date'):
+                            value=block.get(field)
+                            if isinstance(value,str):
+                                from datetime import date
+                                if date.fromisoformat(value).isoformat()!=value:
+                                    raise CalendarError('invalid_response')
+                                item[field]=value
+                        item['timezone_uncertain']=block.get('timezone_uncertain') is True
                     if detail:
                         item['title'] = str(block.get('title', '忙碌'))[:160]
                     clean.append(item); intervals.append((a,b))
                 merged.extend(intervals)
-                row.update(state='known' if complete else 'partial', reason='' if complete else 'partial_coverage', busy=clean, visibility='details' if detail else 'busy')
+                row.update(state='known' if complete else 'partial', reason='' if complete else ('all_day_timezone_unknown' if isinstance(projection,dict) and projection.get('uncertainty_reason')=='all_day_timezone_unknown' else 'partial_coverage'), busy=clean, all_day=[item for item in clean if item['all_day']], visibility='details' if detail else 'busy')
             except (CalendarError, ValueError, TypeError, AttributeError):
                 row['reason'] = 'provider_unavailable'
         elif not connection:

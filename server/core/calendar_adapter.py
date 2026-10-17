@@ -14,7 +14,8 @@ class CalendarWriteResult:
 class CalendarAdapter:
     """Provider implementation must enforce these semantics before enabling sync.
 
-    availability returns UTC-aware half-open intervals: {start,end,title?}.
+    availability returns UTC-aware half-open intervals: {start,end,all_day?,title?}.
+    Date-only all-day items retain start_date/end_date; missing zone is explicit.
     write must deduplicate a stable key, enforce expected_version, and explicitly
     suppress invitations until requested. Uncertain outcomes must be reconcilable
     by idempotency key; callers never generate another create key on timeout.
@@ -63,10 +64,13 @@ class ChronelleDelegatedAdapter(CalendarAdapter):
         if status!=200 or not isinstance(data,dict) or data.get('calendar_ref')!=reference or data.get('coverage') not in ['complete','partial'] or not isinstance(data.get('intervals'),list):
             raise CalendarError('invalid_public_response')
         result=[]
+        timezone_uncertain=False
         for row in data['intervals']:
             if not isinstance(row,dict) or row.get('visibility') not in ['busy','published'] or type(row.get('all_day')) is not bool:
                 raise CalendarError('invalid_public_response')
-            item={}
+            item={'all_day':row['all_day']}
+            if row['all_day']:
+                item['timezone_uncertain']=False
             for field in ['start','end']:
                 value=row.get(field)
                 if not isinstance(value,str):raise CalendarError('invalid_public_response')
@@ -75,12 +79,16 @@ class ChronelleDelegatedAdapter(CalendarAdapter):
                 if row['all_day'] and len(value)==10:
                     from datetime import timedelta
                     parsed=datetime.combine(date.fromisoformat(value),time(),timezone.utc)
+                    item[field+'_date']=value
+                    item['timezone_uncertain']=True
+                    timezone_uncertain=True
                     parsed+=timedelta(hours=-14 if field=='start' else 12)
                     item[field]=parsed.isoformat()
                 else:item[field]=value
             if details and row['visibility']=='published' and isinstance(row.get('title'),str):item['title']=row['title'][:160]
             result.append(item)
-        return {'intervals':result,'complete':data['coverage']=='complete'}
+        return {'intervals':result,'complete':data['coverage']=='complete' and not timezone_uncertain,
+                'uncertainty_reason':'all_day_timezone_unknown' if timezone_uncertain else ''}
     def request(self,connection,method,route,body=None,key=None):
         headers={'Idempotency-Key':key} if key else {}
         try:

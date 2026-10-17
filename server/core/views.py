@@ -1,5 +1,4 @@
 import json
-import hashlib
 import uuid
 import time
 from urllib.parse import urlsplit
@@ -23,20 +22,14 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError as APIValidationError
 from .models import User, ResearchGroup, Membership, ResearchTask, Entry, FriendomIdentity
 from . import mail_verification
+from .user_profiles import avatar_profile, public_user_json
 from django.utils import timezone
 
 
 def user_json(user):
     identity = FriendomIdentity.objects.filter(user=user).first()
-    url = f'/api/avatars/preset/{user.avatar_preset}/'
-    if user.avatar_source == 'friendom':
-        if identity and identity.avatar_url:
-            url = identity.avatar_url
-    if user.avatar_source == 'gravatar':
-        digest = identity.gravatar_email_hash if user.gravatar_email_source == 'friendom' and identity else hashlib.sha256(user.email.strip().lower().encode()).hexdigest() if user.email else ''
-        if digest:
-            url = f'https://gravatar.com/avatar/{digest}?s=160&d=404&r=g'
-    return {'id': user.id, 'email': user.email, 'email_verified': bool(user.email_verified_at), 'name': user.first_name or user.email, 'avatar_source': user.avatar_source, 'avatar_preset': user.avatar_preset, 'avatar_url': url, 'friendom_connected': bool(identity), 'friendom_gravatar_ready': bool(identity and identity.gravatar_email_hash), 'gravatar_email_source': user.gravatar_email_source}
+    avatar = avatar_profile(user, identity)
+    return {'id': user.id, 'email': user.email, 'email_verified': bool(user.email_verified_at), 'name': user.first_name or user.email, 'avatar_source': user.avatar_source, **avatar, 'friendom_connected': bool(identity), 'friendom_gravatar_ready': bool(identity and identity.gravatar_email_hash), 'gravatar_email_source': user.gravatar_email_source}
 
 @require_http_methods(['GET'])
 def session(request):
@@ -193,7 +186,7 @@ def members(request, group_id):
         if not user:
             raise APIValidationError('该邮箱尚未在本地注册')
         Membership.objects.get_or_create(group_id=group_id, user=user, defaults={'role': 'student'})
-    return Response([{'id': m.user_id, 'name': m.user.first_name or m.user.email, 'role': m.role} for m in Membership.objects.filter(group_id=group_id).select_related('user')])
+    return Response([{**public_user_json(m.user), 'role': m.role} for m in Membership.objects.filter(group_id=group_id).select_related('user')])
 
 
 def visible_tasks(user):
@@ -203,7 +196,7 @@ def visible_tasks(user):
 def task_json(task, user):
     is_mentor = bool(task.group_id and Membership.objects.filter(group_id=task.group_id, user=user, role='mentor').exists())
     entries = task.entries.all() if is_mentor else task.entries.filter(owner=user)
-    return {'id': task.id, 'title': task.title, 'description': task.description, 'group_id': task.group_id, 'can_feedback': is_mentor, 'can_write': task.assignees.filter(pk=user.pk).exists(), 'assignees': [{'id': u.id, 'name': u.first_name or u.email} for u in task.assignees.all()], 'entries': [{'id': e.id, 'owner_id': e.owner_id, 'kind': e.kind, 'day': e.day.isoformat(), 'body': e.body} for e in entries.order_by('-day', '-id')]}
+    return {'id': task.id, 'title': task.title, 'description': task.description, 'group_id': task.group_id, 'can_feedback': is_mentor, 'can_write': task.assignees.filter(pk=user.pk).exists(), 'assignees': [public_user_json(u) for u in task.assignees.all()], 'entries': [{'id': e.id, 'owner_id': e.owner_id, 'kind': e.kind, 'day': e.day.isoformat(), 'body': e.body} for e in entries.order_by('-day', '-id')]}
 
 @api_view(['GET', 'POST'])
 def tasks(request):
@@ -266,7 +259,7 @@ def task_detail(request, task_id):
     return Response({'id': entry.id, 'saved': True})
 
 BRAND_ASSETS = {'chronelle-icon-192.png','abandon.svg','favicon-16.png','favicon-32.png','favicon.ico','apple-touch-icon.png','icon-192.png','icon-512.png','icon-maskable-512.png'}
-ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg'}
+ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'avatars.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg'}
 def asset(request, filename):
     if filename not in ASSETS:
         raise Http404

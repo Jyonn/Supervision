@@ -40,6 +40,27 @@ class CalendarAuthorizationTests(TestCase):
         self.assertIsNone(self.captured['max_expiry_days'])
         self.assertFalse(any('invitations' in scope for scope in self.captured['scopes']))
         self.assertEqual(self.post('/api/calendar/authorization/start/',{'consent':True}).status_code,409)
+    def test_metadata_scope_requires_explicit_new_request_and_owner_consent(self):
+        self.assertEqual(self.post('/api/calendar/authorization/start/',{'consent':True,'include_calendar_names':True}).status_code,200)
+        self.assertIn('calendar.categories.read',self.captured['scopes'])
+        self.assertFalse(self.captured['all_groups'])
+        original=self.transport
+        def metadata(method,path,body=None,headers=None):
+            status,data=original(method,path,body,headers)
+            if path.endswith('/claim/'):data['grant']['scopes'].append('calendar.categories.read')
+            return status,data
+        self.mock.side_effect=metadata
+        self.assertEqual(self.post('/api/calendar/authorization/claim/').status_code,200)
+        self.assertIn('calendar.categories.read',CalendarCredential.objects.get().connection.capabilities)
+    def test_unsolicited_metadata_scope_is_rejected_for_old_request(self):
+        self.begin();original=self.transport
+        def extra(method,path,body=None,headers=None):
+            status,data=original(method,path,body,headers)
+            if path.endswith('/claim/'):data['grant']['scopes'].append('calendar.categories.read')
+            return status,data
+        self.mock.side_effect=extra
+        self.assertEqual(self.post('/api/calendar/authorization/claim/').status_code,409)
+        self.assertFalse(CalendarCredential.objects.exists())
     def test_claim_encryption_identity_and_single_use(self):
         self.begin();result=self.post('/api/calendar/authorization/claim/')
         self.assertEqual(result.json(),{'connected':True})

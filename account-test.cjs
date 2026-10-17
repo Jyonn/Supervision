@@ -1,6 +1,6 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const el={innerHTML:''};const ctx=vm.createContext({console,document:{getElementById:()=>el,addEventListener(){}},window:{addEventListener(){}},setTimeout(){},sessionStorage:{getItem(){return null},setItem(){}},Date});
-vm.runInContext(fs.readFileSync('markdown.js','utf8'),ctx);vm.runInContext(fs.readFileSync('calendar.js','utf8'),ctx);vm.runInContext(fs.readFileSync('account.js','utf8').replace(/boot\(\);\s*$/,''),ctx);
+vm.runInContext(fs.readFileSync('markdown.js','utf8'),ctx);vm.runInContext(fs.readFileSync('avatars.js','utf8'),ctx);vm.runInContext(fs.readFileSync('calendar.js','utf8'),ctx);vm.runInContext(fs.readFileSync('account.js','utf8').replace(/boot\(\);\s*$/,''),ctx);
 vm.runInContext("sessionUser={id:1,name:'本地用户'};activeTask={id:1,title:'任务'};editorState={kind:'report',day:'2026-10-17',owner_id:1,body:'内容'}",ctx);
 for(const page of ['authPage()', 'recordEditor()', 'newTaskPage()', 'groupPageReal()', 'overviewPage()', 'profilePage()', 'gravatarChoices()', 'calendarPage()','availabilityMarkup()']){let html=vm.runInContext(page,ctx);for(const match of html.matchAll(/(?:onclick|oninput|onchange|onkeydown|onsubmit)="([^"]*)"/g)){let code=match[1].replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');try{new Function('event',code)}catch(e){throw Error(page+': invalid inline handler: '+code)}}}
 console.log('PASS: account page rendering and all generated editor/form handlers parse.');
@@ -33,3 +33,11 @@ console.log('PASS: group selection isolates progress, counts visible assignments
  assert.equal(vm.runInContext("apiURL('/api/avatars/preset/35/')",production),'https://api.abandon.qijiong.work/api/avatars/preset/35/?v=chronelle-v2');
  console.log('PASS: production API origin, credentialed requests, CSRF header and Pages root route.');
 })().catch(error=>{console.error(error);process.exitCode=1});
+
+vm.runInContext("sessionUser={id:1,name:'本人',avatar_source:'preset',avatar_preset:8,avatar_url:'/api/avatars/preset/8/'};screen='detail';activeTask={id:5};editorState={kind:'report',body:'未保存'};renderAccount=()=>{};openProfile()",ctx);
+assert.equal(vm.runInContext('screen',ctx),'profile');assert.equal(vm.runInContext('editorState',ctx),null);
+vm.runInContext('closeProfile()',ctx);assert.equal(vm.runInContext('screen',ctx),'detail');assert.equal(vm.runInContext('editorState.body',ctx),'未保存');
+vm.runInContext("avatarDraft={source:'preset',preset:8}",ctx);const picker=vm.runInContext('avatarPickerMarkup()',ctx);assert.equal((picker.match(/aria-label="内置头像 /g)||[]).length,36);assert.equal((picker.match(/aria-pressed="true"/g)||[]).length,1);assert.match(picker,/role="radiogroup"/);
+vm.runInContext("avatarDraft.source='gravatar'",ctx);const externalPicker=vm.runInContext('avatarPickerMarkup()',ctx);assert.doesNotMatch(externalPicker,/<img/);assert.match(externalPicker,/gravatar-agree/);
+assert.doesNotMatch(vm.runInContext('profilePage()',ctx),/avatar-source-option/);assert.match(vm.runInContext('profilePage()',ctx),/更换头像/);
+console.log('PASS: avatar-only profile entry, draft-preserving return, one selected preset, external source consent before loading.');

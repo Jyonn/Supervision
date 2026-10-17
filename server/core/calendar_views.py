@@ -1,4 +1,6 @@
 from zoneinfo import ZoneInfo
+import time
+from django.utils import timezone
 import uuid
 from django.conf import settings
 from django.db import transaction
@@ -30,13 +32,12 @@ def connection(request):
                 return Response({'error':'暂时无法核对日历连接'},status=503)
         elif request.data.get('action')=='select_group' and set(request.data)=={'action','group_id'}:
             credential=CalendarCredential.objects.filter(connection=value).first() if value else None
-            if not credential or type(request.data['group_id']) is not int or request.data['group_id'] not in credential.group_ids:
+            if not credential or credential.expires_at is not None and credential.expires_at<=timezone.now() or type(request.data['group_id']) is not int or request.data['group_id'] not in credential.group_ids:
                 raise ValidationError('请选择本人明确授权的类别组')
             value.event_group_id=request.data['group_id'];value.save(update_fields=['event_group_id'])
-        elif request.data != {'action':'revoke'}:
+        elif request.data not in ({'action':'revoke'},{'action':'refresh_metadata'}):
             raise ValidationError('不支持的连接操作')
     if request.method=='POST' and request.data=={'action':'revoke'}:
-        from django.utils import timezone
         with transaction.atomic():
             if value:
                 value.status='revoked';value.revoked_at=timezone.now();value.save(update_fields=['status','revoked_at'])
@@ -48,17 +49,33 @@ def connection(request):
     from .calendar_authorization import configured
     credential=CalendarCredential.objects.filter(connection=value).first() if value else None
     pending=request.session.get('calendar_pending')
-    return Response({'status':value.status if value else 'disconnected','capabilities':value.capabilities if value and value.status=='active' else [],
-        'provider_ready':settings.CHRONELLE_ENABLED,'auth_ready':configured(),'pending':bool(pending),
+    effective_status=value.status if value else 'disconnected'
+    if value and value.status=='active' and credential and credential.expires_at is not None and credential.expires_at<=timezone.now():effective_status='expired'
+    groups,metadata_status=[],'unavailable'
+    if effective_status=='active' and credential and settings.CHRONELLE_AUTH_ENABLED:
+        from .calendar_metadata import authorized_groups
+        groups,metadata_status=authorized_groups(value,credential,refresh=request.method=='POST' and request.data.get('action')=='refresh_metadata')
+        value.refresh_from_db(fields=['status'])
+        if value.status!='active':effective_status=value.status
+    auth_state='none'
+    if pending:
+        attempt=CalendarAuthorizationAttempt.objects.filter(user=request.user,request_id=pending.get('request_id')).first()
+        auth_state='expired' if pending.get('expires',0)<=time.time() else attempt.status if attempt else 'failed'
+    return Response({'status':effective_status,'capabilities':value.capabilities if value and value.status=='active' else [],
+        'provider_ready':settings.CHRONELLE_ENABLED,'auth_ready':configured(),'pending':auth_state in ['pending','claiming'],
+        'connected_at':value.authorized_at if value else None,'authorization_status':auth_state,'authorization_expires_at':pending.get('expires') if pending else None,
+        'available_groups':groups,'group_metadata_status':metadata_status,
+        'is_fixture':bool(getattr(settings,'LOCAL_REVIEW_FIXTURE',False)),
+        'auth_unavailable_reason':'review_fixture' if getattr(settings,'LOCAL_REVIEW_FIXTURE',False) else '' if configured() else 'not_configured',
         'grant_expires_at':credential.expires_at if credential else None,
         'grant_permanent':bool(credential and credential.expires_at is None),
         'event_group_id':value.event_group_id if value else None,'available_group_ids':credential.group_ids if credential else [],'remote_revocation_supported':False})
 
 @api_view(['POST'])
 def authorization_start(request):
-    if request.data!={'consent':True}:raise ValidationError('请明确选择前往Chronelle授权')
+    if (set(request.data)-{'consent','include_calendar_names'} or request.data.get('consent') is not True or type(request.data.get('include_calendar_names',False)) is not bool):raise ValidationError('请明确选择前往Chronelle授权')
     from .calendar_authorization import begin
-    try:return Response(begin(request))
+    try:return Response(begin(request,include_metadata=request.data.get('include_calendar_names',False)))
     except CalendarError as error:return Response({'error':'连接请求未完成','code':error.code},status=409 if error.code=='attempt_pending' else 503)
 
 @api_view(['POST'])

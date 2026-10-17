@@ -46,15 +46,16 @@ def transport(method,path,body=None,headers=None):
     except (OSError,ValueError,URLError):raise CalendarError('provider_unavailable') from None
 
 @sensitive_variables()
-def begin(request):
+def begin(request,include_metadata=False):
     if not configured():raise CalendarError('not_configured')
     existing=request.session.get('calendar_pending')
     if existing and existing.get('expires',0)>time.time():raise CalendarError('attempt_pending')
     verifier=secrets.token_urlsafe(48);state=secrets.token_urlsafe(32)
     challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
-    body={'app_name':'板凳 · Abandon','app_url':settings.CHRONELLE_APP_URL,'purpose':'研究组会议预约与本人日历事件管理；组员可见范围另行选择',
+    scopes=list(SCOPES)+(['calendar.categories.read'] if include_metadata is True else [])
+    body={'app_name':getattr(settings,'CHRONELLE_APP_NAME','板凳 · Abandon'),'app_url':settings.CHRONELLE_APP_URL,'purpose':getattr(settings,'CHRONELLE_PURPOSE','研究组会议预约与本人日历事件管理；组员可见范围另行选择')+('；本次额外申请读取本人选定日历及类别的名称、颜色，由本人确认。' if include_metadata else ''),
         'code_challenge':challenge,'code_challenge_method':'S256','redirect_uri':settings.CHRONELLE_CALLBACK_URL,
-        'state':state,'scopes':list(SCOPES),'all_groups':False,'max_expiry_days':None}
+        'state':state,'scopes':scopes,'all_groups':False,'max_expiry_days':None}
     status,data=transport('POST','/api/delegated-authorizations/requests/',body,{})
     try:
         request_id=str(uuid.UUID(data['request_id']))
@@ -62,7 +63,7 @@ def begin(request):
         if status!=201 or data.get('authorize_url')!=expected or not https_origin(settings.CHRONELLE_AUTHORIZE_ORIGIN):raise ValueError
     except (KeyError,TypeError,ValueError):raise CalendarError('invalid_response') from None
     request.session['calendar_pending']={'request_id':request_id,'state':state,'verifier':verifier,'user_id':request.user.pk,
-        'callback':settings.CHRONELLE_CALLBACK_URL,'expires':time.time()+min(600,data.get('expires_in',600)),'last_poll':0}
+        'callback':settings.CHRONELLE_CALLBACK_URL,'requested_scopes':scopes,'expires':time.time()+min(600,data.get('expires_in',600)),'last_poll':0}
     from datetime import timedelta
     CalendarAuthorizationAttempt.objects.create(request_id=request_id,user=request.user,expires_at=timezone.now()+timedelta(seconds=600))
     return {'authorize_url':expected,'poll_interval':3,'pending':True}
@@ -105,7 +106,7 @@ def claim(request,callback=None):
         expires=parse_datetime(raw_expiry) if raw_expiry is not None else None
         if (data.get('status')!='approved' or data.get('token_type')!='Bearer' or not isinstance(token,str) or not re.fullmatch(r'cdg_[A-Za-z0-9_-]{43}',token)
             or not secrets.compare_digest(data.get('state',''),pending['state']) or not isinstance(scopes,list)
-            or 'calendar.identity.read' not in scopes or not set(scopes)<=set(SCOPES)
+            or 'calendar.identity.read' not in scopes or not set(scopes)<=set(pending.get('requested_scopes',SCOPES))
             or raw_expiry is not None and (not expires or timezone.is_naive(expires) or expires<=timezone.now())
             or grant.get('paused') or grant.get('revoked') or grant.get('all_groups') is not False):raise ValueError
         identity_status,identity=transport('GET','/api/delegated/v1/identity/',None,{'Authorization':'Bearer '+token})
