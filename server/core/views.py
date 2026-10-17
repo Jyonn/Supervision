@@ -265,8 +265,8 @@ def task_detail(request, task_id):
     entry, _ = Entry.objects.update_or_create(task=task, owner_id=owner_id, kind=kind, day=day, defaults={'body': body})
     return Response({'id': entry.id, 'saved': True})
 
-BRAND_ASSETS = {'abandon.svg','favicon-16.png','favicon-32.png','favicon.ico','apple-touch-icon.png','icon-192.png','icon-512.png','icon-maskable-512.png'}
-ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'ui.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg'}
+BRAND_ASSETS = {'chronelle-icon-192.png','abandon.svg','favicon-16.png','favicon-32.png','favicon.ico','apple-touch-icon.png','icon-192.png','icon-512.png','icon-maskable-512.png'}
+ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg'}
 def asset(request, filename):
     if filename not in ASSETS:
         raise Http404
@@ -309,14 +309,8 @@ def profile(request):
     return Response(user_json(user))
 
 def preset_avatar(request, preset):
-    if not 0 <= preset < 36:
-        raise Http404
-    palette = [('#e1e9f6','#7792b6'),('#e3ede5','#7d9d83'),('#eee5df','#b1937e'),('#eae4f2','#9c89b5'),('#f1e8d9','#baa074'),('#dceced','#7a9fa4')]
-    bg, ink = palette[preset % 6]
-    variant = preset // 6
-    ears = f'<ellipse cx="40" cy="40" rx="16" ry="{18+variant*2}" fill="{ink}"/><ellipse cx="88" cy="40" rx="16" ry="{18+variant*2}" fill="{ink}"/>' if variant % 2 else ''
-    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="{bg}"/>{ears}<ellipse cx="64" cy="72" rx="38" ry="34" fill="{ink}"/><circle cx="50" cy="68" r="3" fill="white"/><circle cx="78" cy="68" r="3" fill="white"/><path d="M55 83 Q64 {90+variant} 73 83" stroke="white" stroke-width="3" fill="none" stroke-linecap="round"/></svg>'
-    return HttpResponse(svg, content_type='image/svg+xml', headers={'Cache-Control': 'public, max-age=86400'})
+    from .preset_avatars import preset_avatar_response
+    return preset_avatar_response(preset)
 
 
 @require_http_methods(['GET'])

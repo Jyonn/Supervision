@@ -11,7 +11,7 @@ if out.exists():
     shutil.rmtree(out)
 (out / 'assets').mkdir(parents=True)
 html = (root / 'account.html').read_text()
-for name in ['ui.js', 'ui.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg']:
+for name in ['ui.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg']:
     text = (root / name).read_text()
     if name == 'account.js':
         calendar_version=hashlib.sha256((root/'calendar.js').read_bytes()).hexdigest()[:12]
@@ -27,7 +27,7 @@ for name in ['ui.js', 'ui.css', 'style.css', 'account.css', 'account.js', 'calen
         text = text.replace('<a class="local-link" href="http://127.0.0.1:4173" target="_blank" rel="noopener">独立演示原型 ↗</a>', '')
     (out / 'assets' / name).write_text(text)
 (out / 'assets/runtime.js').write_text("window.SUPERVISION_CONFIG=Object.freeze({apiOrigin:'https://api.abandon.qijiong.work',production:true});\n")
-for name in ['abandon.svg','favicon-16.png','favicon-32.png','favicon.ico','apple-touch-icon.png','icon-192.png','icon-512.png','icon-maskable-512.png']:
+for name in ['chronelle-icon-192.png','abandon.svg','favicon-16.png','favicon-32.png','favicon.ico','apple-touch-icon.png','icon-192.png','icon-512.png','icon-maskable-512.png']:
     shutil.copyfile(root/'brand'/name,out/'assets'/name)
 webmanifest=json.loads((root/'site.webmanifest').read_text())
 for icon in webmanifest['icons']:
