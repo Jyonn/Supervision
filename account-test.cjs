@@ -6,11 +6,11 @@ for(const page of ['authPage()', 'recordEditor()', 'newTaskPage()', 'groupPageRe
 console.log('PASS: account page rendering and all generated editor/form handlers parse.');
 (async()=>{
  const requests=[];
- const production=vm.createContext({console,document:{getElementById:()=>el,addEventListener(){}},window:{SUPERVISION_CONFIG:{apiOrigin:'https://api.supervision.qijiong.work',production:true},addEventListener(){}},fetch:async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>({csrf:'synthetic-csrf'})}},setTimeout(){},sessionStorage:{},Date});
+ const production=vm.createContext({console,document:{getElementById:()=>el,addEventListener(){}},window:{SUPERVISION_CONFIG:{apiOrigin:'https://api.abandon.qijiong.work',production:true},addEventListener(){}},fetch:async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>({csrf:'synthetic-csrf'})}},setTimeout(){},sessionStorage:{},Date});
  vm.runInContext(fs.readFileSync('account.js','utf8').replace(/boot\(\);\s*$/,''),production);
  await vm.runInContext("api('session/')",production);
  await vm.runInContext("api('profile/','PATCH',{name:'Synthetic'})",production);
- assert.equal(requests[0].url,'https://api.supervision.qijiong.work/api/session/');
+ assert.equal(requests[0].url,'https://api.abandon.qijiong.work/api/session/');
  assert.equal(requests[0].options.credentials,'include');
  assert.equal(requests[1].options.headers['X-CSRFToken'],'synthetic-csrf');
  assert.equal(vm.runInContext('appPath()',production),'/');

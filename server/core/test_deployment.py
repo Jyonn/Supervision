@@ -2,15 +2,15 @@ from django.test import TestCase, Client, override_settings
 from django.core.exceptions import ImproperlyConfigured
 from supervision.deployment_config import chronelle_config
 
-ORIGIN = 'https://supervision.qijiong.work'
+ORIGIN = 'https://abandon.qijiong.work'
 
 class ChronelleProductionConfigTests(TestCase):
     def environment(self):
         return {'SUPERVISION_CHRONELLE_AUTH_ENABLED':'1','SUPERVISION_CHRONELLE_ENABLED':'1',
             'SUPERVISION_CHRONELLE_API_ORIGIN':'https://api.chronelle.jyonn.space',
             'SUPERVISION_CHRONELLE_AUTHORIZE_ORIGIN':'https://chronelle.jyonn.space',
-            'SUPERVISION_CHRONELLE_APP_URL':'https://api.supervision.qijiong.work',
-            'SUPERVISION_CHRONELLE_CALLBACK_URL':'https://api.supervision.qijiong.work/api/calendar/authorization/callback/'}
+            'SUPERVISION_CHRONELLE_APP_URL':'https://api.abandon.qijiong.work',
+            'SUPERVISION_CHRONELLE_CALLBACK_URL':'https://api.abandon.qijiong.work/api/calendar/authorization/callback/'}
     def test_default_off_and_exact_complete_configuration(self):
         self.assertFalse(chronelle_config({})['CHRONELLE_AUTH_ENABLED'])
         self.assertFalse(chronelle_config({})['CHRONELLE_ENABLED'])

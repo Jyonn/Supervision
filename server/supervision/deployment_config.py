@@ -5,8 +5,8 @@ def chronelle_config(environment):
     expected = {
         'CHRONELLE_API_ORIGIN': 'https://api.chronelle.jyonn.space',
         'CHRONELLE_AUTHORIZE_ORIGIN': 'https://chronelle.jyonn.space',
-        'CHRONELLE_APP_URL': 'https://api.supervision.qijiong.work',
-        'CHRONELLE_CALLBACK_URL': 'https://api.supervision.qijiong.work/api/calendar/authorization/callback/',
+        'CHRONELLE_APP_URL': 'https://api.abandon.qijiong.work',
+        'CHRONELLE_CALLBACK_URL': 'https://api.abandon.qijiong.work/api/calendar/authorization/callback/',
     }
     result = {}
     for name in ['CHRONELLE_ENABLED', 'CHRONELLE_AUTH_ENABLED']:

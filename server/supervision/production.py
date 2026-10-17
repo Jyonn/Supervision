@@ -11,9 +11,9 @@ def required(name):
 SECRET_KEY = required('SUPERVISION_SECRET_KEY')
 if len(SECRET_KEY) < 50:
     raise ImproperlyConfigured('SUPERVISION_SECRET_KEY must have at least 50 characters')
-FRONTEND_ORIGIN = 'https://supervision.qijiong.work'
-PUBLIC_API_ORIGIN = 'https://api.supervision.qijiong.work'
-ALLOWED_HOSTS = ['api.supervision.qijiong.work']
+FRONTEND_ORIGIN = 'https://abandon.qijiong.work'
+PUBLIC_API_ORIGIN = 'https://api.abandon.qijiong.work'
+ALLOWED_HOSTS = ['api.abandon.qijiong.work']
 CSRF_TRUSTED_ORIGINS = [FRONTEND_ORIGIN]
 CORS_ALLOWED_ORIGINS = [FRONTEND_ORIGIN]
 MIDDLEWARE.insert(1, 'core.middleware.ExactOriginCors')
