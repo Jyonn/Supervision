@@ -5,11 +5,12 @@ import hashlib
 import secrets
 import time
 import uuid
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone as datetime_timezone
 from urllib.parse import urlencode, urlsplit, parse_qs
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction, IntegrityError
+from django.db.models import F
 from django.http import HttpResponseRedirect, HttpResponse
 from django.utils import timezone
 from django.views.decorators.http import require_GET
@@ -20,7 +21,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError as APIError
 from .models import (GroupSpaceBinding, GroupInvitation, SpaceIdentity,
-                     InvitationAcceptance, Membership, User, FriendomIdentity)
+                     InvitationAcceptance, Membership, User, FriendomIdentity, ResearchGroup, GroupActionReceipt)
 from .views import mentor, membership, valid_email
 from .friendom import approved_adapter, http_transport, FriendomError
 from .session_auth import login_with_fixed_expiry
@@ -74,6 +75,7 @@ def start_flow(request, context):
     if (existing and existing.get('expires', 0) > time.time() and existing.get('user_id') == user_id
             and all(existing.get(key) == value for key, value in context.items())):
         return Response({'authorize_url': 'https://frienden.jyonn.space/oauth/authorize?' + urlencode({'request_id': existing['request_id']}), 'resumed': True})
+    started_at = time.time()
     adapter = approved_adapter()
     from urllib.parse import urlparse
     # Build the original seven OAuth fields server-side; never accept caller redirects.
@@ -96,7 +98,7 @@ def start_flow(request, context):
         return Response({'error': '空间授权暂不可用，请稍后重试'}, status=503)
     pending.update(context)
     pending.update({'expires': time.time() + ttl, 'user_id': request.user.pk if request.user.is_authenticated else None,
-                    'request_id': rid})
+                    'request_id': rid, 'started_at': started_at})
     request.session.pop('friendom_pending', None)
     request.session['group_oauth_pending'] = pending
     return Response({'authorize_url': result['authorization_url']})
@@ -226,6 +228,8 @@ def callback(request):
         if profile.get('space_id') != space or profile['subject'].split(':')[1] != str(space):
             raise FriendomError('Wrong space')
         with transaction.atomic():
+            if not ResearchGroup.objects.filter(pk=pending['group_id']).update(name=F('name')):
+                raise FriendomError('Group no longer exists')
             if pending['purpose'] == 'space_admin':
                 mentor(pending['group_id'], request.user)
                 if profile.get('space_admin') is not True:
@@ -247,6 +251,9 @@ def callback(request):
                 if binding.revision != pending['revision'] or binding.space_id != space:
                     raise FriendomError('Invitation binding changed')
                 user = resolve_user(profile, request.user, space)
+                begun = datetime.fromtimestamp(pending.get('started_at', 0), tz=datetime_timezone.utc)
+                if GroupActionReceipt.objects.filter(user=user, group_id=invite.group_id, action='leave', created_at__gt=begun).exists():
+                    raise FriendomError('An earlier join cannot undo a later exit')
                 Membership.objects.get_or_create(group_id=invite.group_id, user=user, defaults={'role': 'student'})
                 InvitationAcceptance.objects.get_or_create(invitation=invite, user=user)
                 target = {'group': invite.group_id, 'tab': 'home'}

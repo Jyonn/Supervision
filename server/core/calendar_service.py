@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone as datetime_timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.db import transaction
 from django.utils import timezone
-from .models import CalendarConnection, CalendarSharing, ResearchMeeting, MeetingCalendarLink, MeetingSyncOperation
+from .models import ResearchGroup, Membership, CalendarConnection, CalendarSharing, ResearchMeeting, MeetingCalendarLink, MeetingSyncOperation
 from .user_profiles import public_user_json
 from .calendar_adapter import CalendarError, CalendarWriteResult, calendar_adapter
 
@@ -91,7 +91,15 @@ def queue_sync(meeting, action):
 def sync_meeting(meeting_id, actor, expected_revision, adapter=None):
     adapter = adapter or calendar_adapter()
     with transaction.atomic():
-        meeting = ResearchMeeting.objects.select_for_update().get(pk=meeting_id)
+        group_id = ResearchMeeting.objects.filter(pk=meeting_id).values_list('group_id', flat=True).first()
+        if group_id is None or not ResearchGroup.objects.select_for_update().filter(pk=group_id).exists():
+            raise CalendarError('group_unavailable')
+        if not Membership.objects.filter(group_id=group_id, user=actor).exists():
+            raise CalendarError('forbidden')
+        try:
+            meeting = ResearchMeeting.objects.select_for_update().get(pk=meeting_id)
+        except ResearchMeeting.DoesNotExist:
+            raise CalendarError('group_unavailable') from None
         if meeting.organizer_id != actor.pk:
             raise CalendarError('forbidden')
         if meeting.revision != expected_revision:

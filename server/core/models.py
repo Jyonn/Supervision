@@ -169,3 +169,11 @@ class MeetingSyncOperation(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     class Meta:
         constraints = [models.UniqueConstraint(fields=['meeting', 'revision'], name='one_meeting_sync_revision')]
+
+class GroupActionReceipt(models.Model):
+    """Minimal idempotency receipt, deliberately without deleted research content."""
+    request_key = models.UUIDField(primary_key=True, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    group_id = models.PositiveBigIntegerField()
+    action = models.CharField(max_length=8, choices=[('leave', '退出'), ('delete', '永久删除')])
+    created_at = models.DateTimeField(auto_now_add=True)

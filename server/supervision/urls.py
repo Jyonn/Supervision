@@ -16,3 +16,6 @@ urlpatterns += [path('api/auth/friendom/start/', views.friendom_start), path('ap
 
 from core import group_join
 urlpatterns += [path('api/groups/<int:group_id>/space/', group_join.binding), path('api/groups/<int:group_id>/invitations/', group_join.invitations), path('api/join/<str:token>/', group_join.join)]
+
+from core import group_lifecycle
+urlpatterns += [path('api/groups/<int:group_id>/lifecycle/', group_lifecycle.lifecycle)]
