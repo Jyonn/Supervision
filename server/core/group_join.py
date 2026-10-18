@@ -21,7 +21,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError as APIError
 from .models import (GroupSpaceBinding, GroupInvitation, SpaceIdentity,
-                     InvitationAcceptance, Membership, User, FriendomIdentity, ResearchGroup, GroupActionReceipt)
+                     InvitationAcceptance, Membership, User, FriendomIdentity, ResearchGroup, GroupActionReceipt, GroupCreationAttempt)
 from .views import mentor, membership, valid_email
 from .friendom import approved_adapter, http_transport, FriendomError
 from .session_auth import login_with_fixed_expiry
@@ -47,6 +47,36 @@ def active_invitation(token):
 
 def frontend(query):
     return (settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/') + '?' + urlencode(query)
+
+
+def create_group(request):
+    """Start consent with a draft only. All three group rows are created on return."""
+    name = request.data.get('name')
+    try:
+        key = uuid.UUID(str(request.data.get('request_key')))
+    except (ValueError, TypeError, AttributeError):
+        raise APIError('创建请求无效，请重新打开创建窗口')
+    if set(request.data) != {'name', 'request_key'} or not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
+        raise APIError('请输入研究组名称')
+    if not request.session.session_key:
+        request.session.save()
+    session_hash = digest(request.session.session_key)
+    with transaction.atomic():
+        attempt, _ = GroupCreationAttempt.objects.get_or_create(request_key=key, defaults={
+            'user': request.user, 'session_hash': session_hash, 'name': name.strip(),
+            'expires_at': timezone.now()+timedelta(minutes=30)})
+        if attempt.user_id != request.user.pk or not secrets.compare_digest(attempt.session_hash, session_hash):
+            raise PermissionDenied('创建请求不属于当前会话')
+        if attempt.group_id:
+            if not Membership.objects.filter(group_id=attempt.group_id, user=request.user).exists():
+                raise NotFound('此前创建的研究组已不可访问，请重新创建')
+            return Response({'group_id': attempt.group_id, 'completed': True})
+        if attempt.name != name.strip():
+            raise APIError('名称已变更，请重新开始创建')
+        # Retrying a cancelled/expired draft starts a fresh short-lived proof.
+        attempt.expires_at = timezone.now()+timedelta(minutes=30)
+        attempt.save(update_fields=['expires_at'])
+    return start_flow(request, {'purpose': 'space_admin', 'creation_key': str(key)})
 
 
 @api_view(['GET', 'POST'])
@@ -81,7 +111,8 @@ def start_flow(request, context):
     # Build the original seven OAuth fields server-side; never accept caller redirects.
     target, pending = adapter.begin(scopes=('profile', 'email'))
     params = {key: values[0] for key, values in parse_qs(urlparse(target).query).items()}
-    params['space_id'] = context['space_id']
+    if 'space_id' in context:
+        params['space_id'] = context['space_id']
     params['purpose'] = context['purpose']
     try:
         result = http_transport('POST', 'https://api.sermo.jyonn.space/users/oauth/requests', params, {})
@@ -206,12 +237,14 @@ def completed_callback(request):
 def callback(request):
     pending = request.session.pop('group_oauth_pending', None)
     failure_query = {'join_error': 'verification_failed'}
-    if pending and pending.get('purpose') == 'space_admin':
+    if pending and pending.get('creation_key'):
+        failure_query = {'create_error': 'verification_failed'}
+    elif pending and pending.get('purpose') == 'space_admin':
         failure_query.update({'group': pending['group_id'], 'tab': 'members'})
     if request.GET.get('error') == 'access_denied':
-        failure_query['join_error'] = 'cancelled'
+        failure_query['create_error' if pending and pending.get('creation_key') else 'join_error'] = 'cancelled'
     elif pending and pending.get('expires', 0) < time.time():
-        failure_query['join_error'] = 'expired'
+        failure_query['create_error' if pending and pending.get('creation_key') else 'join_error'] = 'expired'
     if pending and pending.get('invite'):
         failure_query['invite'] = pending['invite']
     def fail():
@@ -223,40 +256,65 @@ def callback(request):
             or (request.user.pk if request.user.is_authenticated else None) != pending.get('user_id')):
         return fail()
     try:
+        if not secrets.compare_digest(request.GET['state'], pending.get('state', '')):
+            raise FriendomError('Wrong state')
         profile = approved_adapter().complete(code=request.GET['code'], state=request.GET['state'], pending=pending)
-        space = pending['space_id']
-        if profile.get('space_id') != space or profile['subject'].split(':')[1] != str(space):
+        space = profile.get('space_id') if pending.get('creation_key') else pending['space_id']
+        if type(space) is not int or space < 1 or profile.get('space_id') != space or profile['subject'].split(':')[1] != str(space):
             raise FriendomError('Wrong space')
         with transaction.atomic():
-            if not ResearchGroup.objects.filter(pk=pending['group_id']).update(name=F('name')):
-                raise FriendomError('Group no longer exists')
-            if pending['purpose'] == 'space_admin':
-                mentor(pending['group_id'], request.user)
-                if profile.get('space_admin') is not True:
-                    raise FriendomError('Admin proof required')
-                current = GroupSpaceBinding.objects.select_for_update().filter(group_id=pending['group_id']).first()
-                if (current.revision if current else 0) != pending['revision']:
-                    raise FriendomError('Binding changed during authorization')
-                resolve_user(profile, request.user, space)
-                GroupSpaceBinding.objects.update_or_create(group_id=pending['group_id'], defaults={
-                    'space_id': space, 'admin_subject': profile['subject'], 'revision': pending['revision']+1,
-                    'verified_at': timezone.now(), 'expires_at': timezone.now()+timedelta(hours=24), 'active': True})
-                target = {'group': pending['group_id'], 'tab': 'members'}
+            if pending.get('creation_key'):
+                # A write lock serializes callbacks, including SQLite deployments.
+                if not GroupCreationAttempt.objects.filter(pk=pending['creation_key']).update(name=F('name')):
+                    raise FriendomError('Missing creation draft')
+                attempt = GroupCreationAttempt.objects.select_for_update().get(pk=pending['creation_key'])
+                if (attempt.user_id != request.user.pk or attempt.expires_at <= timezone.now()
+                        or not secrets.compare_digest(attempt.session_hash, digest(request.session.session_key or ''))
+                        or profile.get('space_admin') is not True):
+                    raise FriendomError('Invalid creation proof')
+                if attempt.group_id:
+                    if not Membership.objects.filter(group_id=attempt.group_id, user=request.user).exists():
+                        raise FriendomError('Created group no longer accessible')
+                else:
+                    resolve_user(profile, request.user, space)
+                    group = ResearchGroup.objects.create(name=attempt.name, owner=request.user)
+                    Membership.objects.create(group=group, user=request.user, role='mentor')
+                    GroupSpaceBinding.objects.create(group=group, space_id=space, admin_subject=profile['subject'],
+                        verified_at=timezone.now(), expires_at=timezone.now()+timedelta(hours=24))
+                    attempt.group_id = group.pk
+                    attempt.name = ''  # Completed receipt retains no research-group name.
+                    attempt.save(update_fields=['group_id', 'name'])
+                target = {'group': attempt.group_id, 'tab': 'members', 'created': '1'}
             else:
-                invite, binding = active_invitation(pending['invite'])
-                # Lock the invitation and binding; re-check expiry/revocation inside transaction.
-                GroupInvitation.objects.select_for_update().get(pk=invite.pk)
-                GroupSpaceBinding.objects.select_for_update().get(group_id=invite.group_id)
-                invite, binding = active_invitation(pending['invite'])
-                if binding.revision != pending['revision'] or binding.space_id != space:
-                    raise FriendomError('Invitation binding changed')
-                user = resolve_user(profile, request.user, space)
-                begun = datetime.fromtimestamp(pending.get('started_at', 0), tz=datetime_timezone.utc)
-                if GroupActionReceipt.objects.filter(user=user, group_id=invite.group_id, action='leave', created_at__gt=begun).exists():
-                    raise FriendomError('An earlier join cannot undo a later exit')
-                Membership.objects.get_or_create(group_id=invite.group_id, user=user, defaults={'role': 'student'})
-                InvitationAcceptance.objects.get_or_create(invitation=invite, user=user)
-                target = {'group': invite.group_id, 'tab': 'home'}
+                if not ResearchGroup.objects.filter(pk=pending['group_id']).update(name=F('name')):
+                    raise FriendomError('Group no longer exists')
+                if pending['purpose'] == 'space_admin':
+                    mentor(pending['group_id'], request.user)
+                    if profile.get('space_admin') is not True:
+                        raise FriendomError('Admin proof required')
+                    current = GroupSpaceBinding.objects.select_for_update().filter(group_id=pending['group_id']).first()
+                    if (current.revision if current else 0) != pending['revision']:
+                        raise FriendomError('Binding changed during authorization')
+                    resolve_user(profile, request.user, space)
+                    GroupSpaceBinding.objects.update_or_create(group_id=pending['group_id'], defaults={
+                        'space_id': space, 'admin_subject': profile['subject'], 'revision': pending['revision']+1,
+                        'verified_at': timezone.now(), 'expires_at': timezone.now()+timedelta(hours=24), 'active': True})
+                    target = {'group': pending['group_id'], 'tab': 'members'}
+                else:
+                    invite, binding = active_invitation(pending['invite'])
+                    # Lock the invitation and binding; re-check expiry/revocation inside transaction.
+                    GroupInvitation.objects.select_for_update().get(pk=invite.pk)
+                    GroupSpaceBinding.objects.select_for_update().get(group_id=invite.group_id)
+                    invite, binding = active_invitation(pending['invite'])
+                    if binding.revision != pending['revision'] or binding.space_id != space:
+                        raise FriendomError('Invitation binding changed')
+                    user = resolve_user(profile, request.user, space)
+                    begun = datetime.fromtimestamp(pending.get('started_at', 0), tz=datetime_timezone.utc)
+                    if GroupActionReceipt.objects.filter(user=user, group_id=invite.group_id, action='leave', created_at__gt=begun).exists():
+                        raise FriendomError('An earlier join cannot undo a later exit')
+                    Membership.objects.get_or_create(group_id=invite.group_id, user=user, defaults={'role': 'student'})
+                    InvitationAcceptance.objects.get_or_create(invitation=invite, user=user)
+                    target = {'group': invite.group_id, 'tab': 'home'}
         if pending['purpose'] == 'join' and not request.user.is_authenticated:
             login_with_fixed_expiry(request, user, backend='django.contrib.auth.backends.ModelBackend')
         request.session['group_oauth_completed'] = {'user_id': request.user.pk if pending['purpose'] == 'space_admin' else user.pk, 'group_id': target['group'], 'tab': target['tab'], 'state_hash': digest(request.GET['state']), 'code_hash': digest(request.GET['code']), 'expires': time.time()+300}

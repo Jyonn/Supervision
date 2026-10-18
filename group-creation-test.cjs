@@ -1,0 +1,16 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const storage=new Map();let html='',sent,redirect;const button={disabled:false};
+const ctx=vm.createContext({console,URL,URLSearchParams,crypto:require('node:crypto').webcrypto,location:{search:'',assign(v){redirect=v}},history:{},document:{getElementById:()=>({}),addEventListener(){}},window:{addEventListener(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout(){},FormData:class{constructor(f){this.f=f}get(k){return this.f.elements[k].value}},UI:{open(v){html=v.html}},Date});
+for(const f of ['markdown.js','avatars.js','account.js','group-workspace.js'])vm.runInContext(fs.readFileSync(f,'utf8'),ctx);
+ctx.form={elements:{name:{value:'虚构新组'}},querySelector:()=>button};
+vm.runInContext(`sessionUser={id:3};api=async function(path,method,body){sentBody=body;return {authorize_url:'https://frienden.jyonn.space/oauth/authorize?request_id=fake'}};message=function(){};`,ctx);
+(async()=>{
+ vm.runInContext('openCreateGroup()',ctx);assert.match(html,/继续前往 Frienden/);assert.doesNotMatch(html,/name="(?:space_id|slug)"/);
+ const pending=vm.runInContext('createGroup({preventDefault(){},currentTarget:form})',ctx);
+ await vm.runInContext('createGroup({preventDefault(){},currentTarget:form})',ctx);await pending;
+ sent=vm.runInContext('sentBody',ctx);assert.equal(sent.name,'虚构新组');assert.ok(sent.request_key);assert.deepEqual(Object.keys(sent).sort(),['name','request_key']);assert.match(redirect,/frienden/);
+ vm.runInContext('openCreateGroup()',ctx);assert.match(html,/value="虚构新组"/);
+ const old=sent.request_key;ctx.form.elements.name.value='换个名称';const next=vm.runInContext('keepCreationDraft(form)',ctx);assert.notEqual(next.request_key,old);
+ vm.runInContext('sessionUser={id:4};openCreateGroup()',ctx);assert.doesNotMatch(html,/换个名称/);
+ console.log('PASS: name-only teacher consent, retryable per-account draft, fresh key on rename and duplicate submission guard.');
+})().catch(e=>{console.error(e);process.exitCode=1});

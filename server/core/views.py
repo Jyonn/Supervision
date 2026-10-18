@@ -164,13 +164,8 @@ def mentor(group_id, user):
 def groups(request):
     if request.method == 'GET':
         return Response([{'id': m.group_id, 'name': m.group.name, 'role': m.role, 'is_owner': m.group.owner_id == request.user.pk} for m in Membership.objects.filter(user=request.user).select_related('group')])
-    name = request.data.get('name', '')
-    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
-        raise APIValidationError('请输入研究组名称')
-    with transaction.atomic():
-        group = ResearchGroup.objects.create(name=name.strip(), owner=request.user)
-        Membership.objects.create(group=group, user=request.user, role='mentor')
-    return Response({'id': group.id, 'name': group.name, 'role': 'mentor', 'is_owner': True}, status=201)
+    from .group_join import create_group
+    return create_group(request)
 
 @api_view(['GET', 'POST'])
 def members(request, group_id):

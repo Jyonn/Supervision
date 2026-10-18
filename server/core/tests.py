@@ -109,7 +109,9 @@ class PermissionTests(TestCase):
         self.assertEqual(self.post(f'/api/tasks/{task_id}/', {'kind': 'report', 'body': '试图越权'}, self.other).status_code, 404)
         self.assertEqual(self.post('/api/tasks/', {'title': '伪造分配', 'assignee_ids': [self.two.id]}).status_code, 403)
     def make_group_task(self):
-        group = self.post('/api/groups/', {'name': '测试研究组'}).json()
+        model = ResearchGroup.objects.create(name='测试研究组', owner=self.one)
+        Membership.objects.create(group=model, user=self.one, role='mentor')
+        group = {'id': model.pk}
         Membership.objects.create(group_id=group['id'], user=self.two, role='student')
         task = self.post('/api/tasks/', {'title': '组任务', 'group_id': group['id'], 'assignee_ids': [self.two.id]}).json()
         return group, task
@@ -144,7 +146,9 @@ class PermissionTests(TestCase):
         self.assertEqual(len(self.client.get(url).json()['entries']), 2)
         self.assertEqual(self.post(url, {'kind': 'report', 'owner_id': self.three.id, 'body': '篡改'}, self.other).status_code, 403)
     def test_group_assignment_validation(self):
-        group = self.post('/api/groups/', {'name': '组'}).json()
+        model = ResearchGroup.objects.create(name='组', owner=self.one)
+        Membership.objects.create(group=model, user=self.one, role='mentor')
+        group = {'id': model.pk}
         self.assertEqual(self.post('/api/tasks/', {'title': '非法成员', 'group_id': group['id'], 'assignee_ids': [self.three.id]}).status_code, 400)
 
 @override_settings(EMAIL_VERIFICATION_REQUIRED=False)
