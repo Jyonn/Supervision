@@ -60,3 +60,5 @@ LOGGING = {
 
 # Frozen space OAuth contract. Off until the provider and client capability are approved.
 FRIENDEN_SPACE_OAUTH_ENABLED = False
+
+FRIENDEN_SPACE_METADATA_ENABLED = False

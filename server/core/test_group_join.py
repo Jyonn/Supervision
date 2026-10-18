@@ -101,7 +101,7 @@ class GroupWorkspaceTests(TestCase):
         self.assertFalse(SpaceIdentity.objects.exists())
     def test_admin_requires_claim_and_login_matches(self):
         with patch('core.group_join.http_transport',return_value={'request_id':'r'*43,'expires_in':1800,'authorization_url':'https://frienden.jyonn.space/oauth/authorize?request_id='+'r'*43}):
-            self.client.post(f'/api/groups/{self.a.id}/space/',{'space_id':12},content_type='application/json',**self.host)
+            self.client.post(f'/api/groups/{self.a.id}/space/',{},content_type='application/json',**self.host)
         p=self.client.session['group_oauth_pending']
         self.assertIn('join_error',self.complete(p,verified_email='mentor@example.test',subject='sermo:12:1').url)
         self.assertEqual(GroupSpaceBinding.objects.get().revision,1)
@@ -115,7 +115,7 @@ class GroupWorkspaceTests(TestCase):
         self.assertEqual(self.client.session['_session_expiry'],deadline)
     @override_settings(FRIENDEN_SPACE_OAUTH_ENABLED=False)
     def test_disabled_contract_cannot_fake_authorization(self):
-        self.assertEqual(self.client.post(f'/api/groups/{self.a.id}/space/',{'space_id':12},content_type='application/json',**self.host).status_code,503)
+        self.assertEqual(self.client.post(f'/api/groups/{self.a.id}/space/',{},content_type='application/json',**self.host).status_code,503)
 
     def test_anonymous_join_requires_csrf(self):
         token=self.invite()['token']
@@ -129,7 +129,7 @@ class GroupWorkspaceTests(TestCase):
     def test_admin_success_and_binding_replacement_invalidates_old_invite(self):
         token=self.invite()['token']
         with patch('core.group_join.http_transport',return_value={'request_id':'r'*43,'expires_in':1800,'authorization_url':'https://frienden.jyonn.space/oauth/authorize?request_id='+'r'*43}):
-            self.client.post(f'/api/groups/{self.a.id}/space/',{'space_id':12},content_type='application/json',**self.host)
+            self.client.post(f'/api/groups/{self.a.id}/space/',{},content_type='application/json',**self.host)
         p=self.client.session['group_oauth_pending']
         r=self.complete(p,verified_email='mentor@example.test',subject='sermo:12:1',space_admin=True)
         self.assertIn('tab=members',r.url)
@@ -196,7 +196,7 @@ class GroupWorkspaceTests(TestCase):
         self.assertEqual(Membership.objects.filter(group=self.a,user=self.student).count(),1)
     def test_admin_cancel_returns_to_same_group_and_preserves_binding(self):
         with patch('core.group_join.http_transport',return_value={'request_id':'r'*43,'expires_in':1800,'authorization_url':'https://frienden.jyonn.space/oauth/authorize?request_id='+'r'*43}):
-            self.client.post(f'/api/groups/{self.a.id}/space/',{'space_id':12},content_type='application/json',**self.host)
+            self.client.post(f'/api/groups/{self.a.id}/space/',{},content_type='application/json',**self.host)
         p=self.client.session['group_oauth_pending']
         r=self.client.get('/api/auth/friendom/callback/',{'error':'access_denied','state':p['state']},**self.host)
         self.assertIn('group='+str(self.a.id),r.url);self.assertIn('tab=members',r.url)
@@ -225,3 +225,34 @@ class GroupWorkspaceTests(TestCase):
         self.assertEqual(self.client.session['_session_expiry'],deadline)
         Membership.objects.filter(group=self.a,user=self.student).delete()
         self.assertIn('error',self.client.get('/api/auth/friendom/callback/',{'state':p['state'],'code':code},**self.host).url)
+
+    @override_settings(FRIENDEN_SPACE_METADATA_ENABLED=True)
+    def test_binding_returns_name_slug_and_caches_trusted_metadata(self):
+        with patch('core.group_join.space_metadata', return_value={'id':12,'name':'虚构空间','slug':'fictional'}) as lookup:
+            response=self.client.get(f'/api/groups/{self.a.id}/space/')
+            self.assertEqual(response.json()['space_name'],'虚构空间')
+            self.assertEqual(response.json()['space_slug'],'fictional')
+            self.assertNotIn('space_id',response.json())
+            self.client.get(f'/api/groups/{self.a.id}/space/')
+            self.assertEqual(lookup.call_count,1)
+    def test_binding_rejects_space_switch_and_renews_original_space(self):
+        url=f'/api/groups/{self.a.id}/space/'
+        self.assertEqual(self.client.post(url,{'space_id':99},content_type='application/json',**self.host).status_code,400)
+        self.binding.expires_at=timezone.now()-timedelta(seconds=1);self.binding.save()
+        state=self.client.get(url).json()
+        self.assertTrue(state['bound']);self.assertFalse(state['verified'])
+        with patch('core.group_join.http_transport',return_value={'request_id':'r'*43,'expires_in':1800,'authorization_url':'https://frienden.jyonn.space/oauth/authorize?request_id='+'r'*43}) as transport:
+            self.assertEqual(self.client.post(url,{},content_type='application/json',**self.host).status_code,200)
+            self.assertEqual(transport.call_args.args[2]['space_id'],12)
+        pending=self.client.session['group_oauth_pending']
+        self.assertIn('join_error',self.complete(pending,space_id=99,subject='sermo:99:1',verified_email=self.teacher.email,space_admin=True).url)
+        self.binding.refresh_from_db();self.assertEqual(self.binding.space_id,12)
+    def test_metadata_resolution_validates_target_and_does_not_authorize(self):
+        from .group_join import space_metadata
+        frozen={'request_id':'m'*43}
+        with patch('core.group_join.http_transport',side_effect=[frozen,{'target_space':{'id':12,'slug':'sample','name':'虚构空间'}}]) as transport:
+            self.assertEqual(space_metadata(12)['slug'],'sample')
+            self.assertEqual(transport.call_count,2)
+            self.assertIn('/oauth/metadata?request_id=',transport.call_args.args[1])
+        with patch('core.group_join.http_transport',side_effect=[frozen,{'target_space':{'id':99,'slug':'other','name':'错误空间'}}]):
+            with self.assertRaises(FriendomError):space_metadata(12)

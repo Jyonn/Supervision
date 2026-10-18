@@ -12,5 +12,9 @@ vm.runInContext(`sessionUser={id:3};api=async function(path,method,body){sentBod
  vm.runInContext('openCreateGroup()',ctx);assert.match(html,/value="虚构新组"/);
  const old=sent.request_key;ctx.form.elements.name.value='换个名称';const next=vm.runInContext('keepCreationDraft(form)',ctx);assert.notEqual(next.request_key,old);
  vm.runInContext('sessionUser={id:4};openCreateGroup()',ctx);assert.doesNotMatch(html,/换个名称/);
+ vm.runInContext(`currentGroupId=1;api=async path=>path.endsWith('space/')?{bound:true,verified:true,space_name:'虚构实验室',space_slug:'fictional-lab',provider_ready:true}:[]`,ctx);
+ await vm.runInContext('openInvitationSettings()',ctx);assert.match(html,/虚构实验室/);assert.match(html,/fictional-lab/);assert.match(html,/生成邀请卡/);assert.doesNotMatch(html,/重新绑定|空间编号|name="space_id"|验证管理员身份/);
+ vm.runInContext(`api=async path=>path.endsWith('space/')?{bound:true,verified:false,space_name:'虚构实验室',space_slug:'fictional-lab',provider_ready:true}:[]`,ctx);
+ await vm.runInContext('openInvitationSettings()',ctx);assert.match(html,/空间不会改变/);assert.match(html,/验证管理员身份/);assert.doesNotMatch(html,/生成邀请卡|空间编号|重新绑定/);
  console.log('PASS: name-only teacher consent, retryable per-account draft, fresh key on rename and duplicate submission guard.');
 })().catch(e=>{console.error(e);process.exitCode=1});

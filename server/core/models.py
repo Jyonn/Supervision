@@ -20,6 +20,8 @@ class ResearchGroup(models.Model):
 class GroupSpaceBinding(models.Model):
     group = models.OneToOneField(ResearchGroup, on_delete=models.CASCADE)
     space_id = models.PositiveBigIntegerField()
+    space_slug = models.CharField(max_length=100, blank=True)
+    space_name = models.CharField(max_length=200, blank=True)
     admin_subject = models.CharField(max_length=100)
     revision = models.PositiveIntegerField(default=1)
     verified_at = models.DateTimeField()

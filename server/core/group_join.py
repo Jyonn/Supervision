@@ -82,17 +82,49 @@ def create_group(request):
 @api_view(['GET', 'POST'])
 def binding(request, group_id):
     membership(group_id, request.user)
+    saved = GroupSpaceBinding.objects.filter(group_id=group_id).first()
     current = binding_for(group_id)
     if request.method == 'GET':
-        return Response({'bound': bool(current), 'space_id': current.space_id if current else None,
-                         'revision': current.revision if current else None,
+        if saved and (not saved.space_slug or not saved.space_name) and getattr(settings, 'FRIENDEN_SPACE_METADATA_ENABLED', False):
+            try:
+                info = space_metadata(saved.space_id)
+                saved.space_slug, saved.space_name = info['slug'], info['name']
+                saved.save(update_fields=['space_slug', 'space_name'])
+            except FriendomError:
+                pass
+        return Response({'bound': bool(saved), 'verified': bool(current),
+                         'space_slug': saved.space_slug if saved else '', 'space_name': saved.space_name if saved else '',
+                         'revision': saved.revision if saved else None,
                          'provider_ready': getattr(settings, 'FRIENDEN_SPACE_OAUTH_ENABLED', False)})
     mentor(group_id, request.user)
-    space = request.data.get('space_id')
-    if type(space) is not int or space < 1 or set(request.data) != {'space_id'}:
-        raise APIError('请输入 Frienden 空间编号')
-    return start_flow(request, {'purpose': 'space_admin', 'group_id': group_id, 'space_id': space,
-                                'revision': GroupSpaceBinding.objects.filter(group_id=group_id).values_list('revision', flat=True).first() or 0})
+    # A binding is permanent. Renewal always uses the server's original space.
+    if request.data:
+        raise APIError('空间由既有绑定确定，不接受空间编号或换绑')
+    context = {'purpose': 'space_admin', 'group_id': group_id, 'revision': saved.revision if saved else 0}
+    if saved:
+        context['space_id'] = saved.space_id
+    return start_flow(request, context)
+
+
+def space_metadata(space_id):
+    """Resolve public display metadata through a fixed provider endpoint, never a caller URL.
+    Frozen requests expire unused; this neither authorizes a grant nor changes the binding.
+    """
+    target, _ = approved_adapter().begin(scopes=('profile', 'email'))
+    params = {key: values[0] for key, values in parse_qs(urlsplit(target).query).items()}
+    params.update(space_id=space_id, purpose='space_admin')
+    response = http_transport('POST', 'https://api.sermo.jyonn.space/users/oauth/requests', params, {})
+    rid = response.get('request_id', '') if isinstance(response, dict) else ''
+    import re
+    if not isinstance(rid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', rid):
+        raise FriendomError('Invalid metadata request')
+    metadata = http_transport('GET', 'https://api.sermo.jyonn.space/users/oauth/metadata?' + urlencode({'request_id': rid}), None, {})
+    info = metadata.get('target_space') if isinstance(metadata, dict) else None
+    if (not isinstance(info, dict) or type(info.get('id')) is not int or info.get('id') != space_id or not isinstance(info.get('slug'), str)
+            or not info['slug'] or len(info['slug']) > 100 or not isinstance(info.get('name'), str)
+            or not info['name'] or len(info['name']) > 200):
+        raise FriendomError('Invalid space metadata')
+    return info
 
 
 def start_flow(request, context):
@@ -168,7 +200,7 @@ def join(request, token):
     invite, b = active_invitation(token)
     if request.method == 'GET':
         return Response({'group_name': invite.group.name, 'mentor_name': invite.created_by.first_name,
-                         'space_id': b.space_id, 'expires_at': invite.expires_at,
+                         'space_name': b.space_name, 'space_slug': b.space_slug, 'expires_at': invite.expires_at,
                          'provider_ready': getattr(settings, 'FRIENDEN_SPACE_OAUTH_ENABLED', False)})
     if request.data.get('consent') is not True or set(request.data) != {'consent'}:
         raise APIError('请确认通过指定 Frienden 空间验证身份并加入本组')
@@ -259,7 +291,7 @@ def callback(request):
         if not secrets.compare_digest(request.GET['state'], pending.get('state', '')):
             raise FriendomError('Wrong state')
         profile = approved_adapter().complete(code=request.GET['code'], state=request.GET['state'], pending=pending)
-        space = profile.get('space_id') if pending.get('creation_key') else pending['space_id']
+        space = profile.get('space_id') if 'space_id' not in pending else pending['space_id']
         if type(space) is not int or space < 1 or profile.get('space_id') != space or profile['subject'].split(':')[1] != str(space):
             raise FriendomError('Wrong space')
         with transaction.atomic():

@@ -73,6 +73,8 @@ class FriendomAdapter:
                     pass
         if type(user.get('space_id')) is int and user['space_id'] > 0:
             result['space_id'] = user['space_id']
+        if isinstance(user.get('space_slug'), str):
+            result['space_slug'] = user['space_slug'][:100]
         if user.get('space_admin') is True:
             result['space_admin'] = True
         return result
@@ -87,7 +89,15 @@ def http_transport(method, url, body, headers):
         def redirect_request(self, *args, **kwargs):
             return None
     approved = {'https://api.sermo.jyonn.space/users/oauth/requests', 'https://api.sermo.jyonn.space/users/oauth/token', 'https://api.sermo.jyonn.space/users/oauth/userinfo'}
-    if url not in approved:
+    parsed = urlsplit(url)
+    from urllib.parse import parse_qs
+    import re
+    query = parse_qs(parsed.query)
+    metadata = (method == 'GET' and parsed.scheme == 'https' and parsed.netloc == 'api.sermo.jyonn.space'
+                and parsed.path == '/users/oauth/metadata' and not parsed.fragment
+                and set(query) == {'request_id'} and len(query['request_id']) == 1
+                and re.fullmatch(r'[A-Za-z0-9_-]{43}', query['request_id'][0]))
+    if url not in approved and not metadata:
         raise FriendomError('Unapproved provider endpoint')
     request = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None,
                                      headers={'Accept': 'application/json', 'Content-Type': 'application/json', **headers}, method=method)

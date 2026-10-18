@@ -43,3 +43,5 @@ globals().update(chronelle_config(os.environ))
 # Approved 2026-10-18: supervision-web administrator proof, registry audit 14.
 # This only enables initiation; every mentor/student still authorizes personally.
 FRIENDEN_SPACE_OAUTH_ENABLED = FRIENDOM_ENABLED and FRIENDOM_EMAIL_ENABLED
+
+FRIENDEN_SPACE_METADATA_ENABLED = FRIENDEN_SPACE_OAUTH_ENABLED
