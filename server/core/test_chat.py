@@ -52,7 +52,7 @@ class ChatTests(TestCase):
         raise AssertionError('Unexpected fixed provider route')
     def credential(self,user=None,group=None,subject=None):
         user=user or self.teacher;group=group or self.group;subject=subject or f'sermo:12:{101 if user==self.teacher else 102}'
-        generation=uuid.uuid4();payload={'token':'t'*43,'user':user.pk,'group':group.pk,'space':12,'subject':subject,'generation':str(generation)}
+        generation=uuid.uuid4();payload={'scopes':list(svc.SCOPES),'token':'t'*43,'user':user.pk,'group':group.pk,'space':12,'subject':subject,'generation':str(generation)}
         value=svc.cipher(create=True).encrypt(json.dumps(payload).encode()).decode()
         return ChatCredential.objects.create(user=user,group=group,space_id=12,subject=subject,generation=generation,ciphertext=value,expires_at=timezone.now()+timedelta(hours=1))
     def begin(self):
@@ -71,7 +71,7 @@ class ChatTests(TestCase):
         self.assertFalse((Path(self.tmp.name)/'vault').exists())
     def test_authorization_is_exact_fixed_space_and_backend_only(self):
         pending=self.begin();body=self.calls[0][2]
-        self.assertEqual(body['scope'],'profile email chat.read chat.write');self.assertEqual(body['space_id'],12);self.assertEqual(body['purpose'],'join')
+        self.assertEqual(body['scope'],' '.join(svc.SCOPES));self.assertEqual(body['space_id'],12);self.assertEqual(body['purpose'],'join')
         response,params=self.callback(pending);self.assertIn('chat=connected',response.url)
         credential=ChatCredential.objects.get();self.assertNotIn('t'*43,credential.ciphertext)
         self.assertNotIn('t'*43,str(self.client.session.items()));self.assertNotIn('t'*43,response.url)

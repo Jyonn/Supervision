@@ -25,7 +25,7 @@ from .models import (ResearchGroup, Membership, GroupSpaceBinding, SpaceIdentity
 from .views import membership, mentor, valid_email
 from .group_join import digest, frontend
 
-SCOPES = ('profile', 'email', 'chat.read', 'chat.write')
+from .collaboration_contract import SCOPES
 ORIGIN = 'https://api.sermo.jyonn.space'
 MESSAGES = {
     'not_enabled': '聊天接入尚未开通；未发起真实授权。',
@@ -68,17 +68,25 @@ def integer(value, zero=False):
 @sensitive_variables()
 def transport(method, path, body=None, token=None):
     # URLs/headers are constructed here, never accepted from a browser.
-    parsed = urlsplit(path); query = parse_qs(parsed.query)
+    parsed = urlsplit(path); query = parse_qs(parsed.query,keep_blank_values=True)
     fixed = (method, parsed.path) in {('POST','/users/oauth/requests'),('POST','/users/oauth/token'),
-        ('GET','/users/oauth/userinfo'),('POST','/users/oauth/revoke'),('GET','/users/oauth/chat/chats')}
-    route = re.fullmatch(r'/users/oauth/chat/chats/[1-9][0-9]*/(messages|events)', parsed.path)
+        ('GET','/users/oauth/userinfo'),('POST','/users/oauth/revoke'),('GET','/users/oauth/chat/chats'),
+        ('GET','/users/oauth/chat/capabilities'),('GET','/users/oauth/chat/invitations'),
+        ('POST','/users/oauth/chat/direct'),('POST','/users/oauth/chat/groups'),
+        ('GET','/users/oauth/contacts'),('POST','/users/oauth/contacts')}
     allowed = fixed and not parsed.query
+    route = re.fullmatch(r'/users/oauth/chat/chats/[1-9][0-9]*(?:/(messages|events|preference|read|manage|invitation))?', parsed.path)
     if route:
         kind = route.group(1)
         keys = {'before','limit'} if kind == 'messages' else {'after','limit'}
-        allowed = (method == 'GET' and set(query) <= keys and
+        allowed = (method == 'GET' and kind in ('messages','events') and set(query) <= keys and
             all(len(v)==1 and re.fullmatch(r'[0-9]{1,19}',v[0]) for v in query.values())) or (
-            method == 'POST' and kind == 'messages' and not parsed.query)
+            method == 'GET' and kind is None and not parsed.query) or (
+            method == 'POST' and kind in ('messages','preference','read','manage','invitation') and not parsed.query)
+    if re.fullmatch(r'/users/oauth/contacts/requests/[1-9][0-9]*/respond',parsed.path):
+        allowed = method == 'POST' and not parsed.query
+    if parsed.path == '/users/oauth/contacts/search':
+        allowed = method == 'GET' and set(query)=={'name'} and len(query['name'])==1 and 1<=len(query['name'][0])<=100
     if parsed.scheme or parsed.netloc or parsed.fragment or not allowed: raise ChatError('invalid_request')
     headers = {'Content-Type':'application/json','Accept':'application/json'}
     if token: headers.update(Authorization='Bearer '+token, **{'X-OAuth-Client-ID':settings.FRIENDOM_CLIENT_ID})
@@ -93,9 +101,10 @@ def transport(method, path, body=None, token=None):
             if not isinstance(data,dict): raise ChatError('invalid_response',502)
             return data
     except HTTPError as error:
-        if error.code in (401,403): raise ChatError('authorization_required',401) from None
+        if error.code == 401: raise ChatError('authorization_required',401)
+        if error.code == 403: raise ChatError('access_denied',403) from None
         raise ChatError('access_denied' if error.code==400 else 'provider_unavailable', error.code if error.code in (400,429) else 502) from None
-    except (OSError, ValueError): raise ChatError('send_uncertain' if method=='POST' and path.endswith('/messages') else 'provider_unavailable',502) from None
+    except (OSError, ValueError): raise ChatError('send_uncertain' if method=='POST' and parsed.path not in ('/users/oauth/requests','/users/oauth/token','/users/oauth/revoke') else 'provider_unavailable',502) from None
 
 @sensitive_variables()
 def cipher(create=False):
@@ -128,7 +137,7 @@ def credential_for(group_id, user):
         invalidate(credential); raise ChatError('authorization_required',401)
     try:
         data=json.loads(cipher().decrypt(credential.ciphertext.encode()))
-        expected={'user':user.pk,'group':group_id,'space':binding.space_id,'subject':identity.subject,'generation':str(credential.generation)}
+        expected={'scopes':list(SCOPES),'user':user.pk,'group':group_id,'space':binding.space_id,'subject':identity.subject,'generation':str(credential.generation)}
         if any(data.get(k)!=v for k,v in expected.items()) or not re.fullmatch(r'[A-Za-z0-9_-]{43}',data['token']): raise ValueError
     except (InvalidToken,ValueError,KeyError,TypeError,AttributeError):
         invalidate(credential); raise ChatError('authorization_required',401) from None
@@ -148,7 +157,7 @@ def current(credential, user, room=None):
     if (binding.space_id!=credential.space_id or identity.subject!=credential.subject or
         not ChatCredential.objects.filter(pk=credential.pk,generation=credential.generation,status='active',expires_at__gt=timezone.now()).exists()):
         raise ChatError('authorization_required',401)
-    if room and not GroupChatRoom.objects.filter(pk=room.pk,updated_at=room.updated_at,space_id=binding.space_id).exists():
+    if room and not getattr(room,'ephemeral',False) and not GroupChatRoom.objects.filter(pk=room.pk,updated_at=room.updated_at,space_id=binding.space_id).exists():
         raise ChatError('room_changed',409)
 
 def allowed_members(group_id, space_id):
@@ -178,6 +187,9 @@ def eligible_rooms(credential, token, user):
 
 @sensitive_variables()
 def selected(credential, token, user, room_key):
+    if isinstance(room_key,str) and room_key.startswith('c:'):
+        from .collaboration import selected_conversation
+        return selected_conversation(credential,token,user,room_key)
     room=GroupChatRoom.objects.filter(group_id=credential.group_id,space_id=credential.space_id).first()
     if not room: raise ChatError('room_required',409)
     if str(room.generation)!=room_key: raise ChatError('room_changed',409)
@@ -202,7 +214,7 @@ def begin(request, group_id):
     _,binding,identity=context(group_id,request.user)
     if request.get_host()!=urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc: raise ChatError('invalid_request')
     existing=request.session.get('chat_oauth_pending')
-    if existing and existing.get('group_id')==group_id and existing.get('user_id')==request.user.pk and existing.get('expires',0)>time.time():
+    if existing and existing.get('group_id')==group_id and existing.get('user_id')==request.user.pk and existing.get('expires',0)>time.time() and existing.get('scopes')==list(SCOPES):
         return {'authorize_url':existing['authorize_url']}
     verifier=secrets.token_urlsafe(48); state=secrets.token_urlsafe(32)
     challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
@@ -218,7 +230,7 @@ def begin(request, group_id):
     attempt=ChatAuthorizationAttempt.objects.create(user=request.user,group_id=group_id,session_hash=digest(request.session.session_key),expires_at=timezone.now()+timedelta(seconds=ttl))
     request.session.pop('group_oauth_pending',None);request.session.pop('friendom_pending',None)
     request.session['chat_oauth_pending']={'group_id':group_id,'user_id':request.user.pk,'space_id':binding.space_id,'subject':identity.subject,
-        'attempt':str(attempt.pk),'state':state,'verifier':verifier,'expires':time.time()+ttl,'authorize_url':url}
+        'scopes':list(SCOPES),'attempt':str(attempt.pk),'state':state,'verifier':verifier,'expires':time.time()+ttl,'authorize_url':url}
     return {'authorize_url':url}
 
 @sensitive_variables()
@@ -251,7 +263,7 @@ def complete(request, pending):
             raise ChatError('identity_required',409)
         valid_email(profile['email'])
         generation=uuid.uuid4()
-        envelope={'token':token,'user':request.user.pk,'group':binding.group_id,'space':binding.space_id,
+        envelope={'scopes':list(SCOPES),'token':token,'user':request.user.pk,'group':binding.group_id,'space':binding.space_id,
                   'subject':identity.subject,'generation':str(generation)}
         sealed=cipher(create=True).encrypt(json.dumps(envelope).encode()).decode()
         with transaction.atomic():
@@ -269,3 +281,19 @@ def complete(request, pending):
             try: transport('POST','/users/oauth/revoke',{},token)
             except ChatError: pass
         raise
+
+@sensitive_variables()
+def store_combined(profile,user,group_id):
+    """Called only after trusted group callback established membership+space identity."""
+    if not enabled(): raise ChatError('not_enabled',503)
+    data=profile.get('_collaboration_token')
+    if not isinstance(data,dict) or set(data)!= {'token','ttl','scopes'} or data['scopes']!=list(SCOPES): raise ChatError('invalid_response',502)
+    token=data['token'];ttl=data['ttl']
+    if not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}',token) or type(ttl)is not int or not 1<=ttl<=3600: raise ChatError('invalid_response',502)
+    _,binding,identity=context(group_id,user)
+    if profile.get('subject')!=identity.subject or profile.get('space_id')!=binding.space_id: raise ChatError('identity_required',409)
+    generation=uuid.uuid4()
+    envelope={'scopes':list(SCOPES),'token':token,'user':user.pk,'group':group_id,'space':binding.space_id,'subject':identity.subject,'generation':str(generation)}
+    sealed=cipher(create=True).encrypt(json.dumps(envelope).encode()).decode()
+    ChatCredential.objects.update_or_create(user=user,group_id=group_id,defaults={'space_id':binding.space_id,'subject':identity.subject,
+        'ciphertext':sealed,'expires_at':timezone.now()+timedelta(seconds=ttl),'generation':generation,'status':'active'})

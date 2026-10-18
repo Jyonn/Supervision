@@ -9,6 +9,7 @@ import hashlib
 import re
 import secrets
 from urllib.parse import urlencode, urlsplit
+from .collaboration_contract import SCOPES
 
 class FriendomError(ValueError):
     pass
@@ -27,7 +28,7 @@ class FriendomAdapter:
         self.authorize_page, self.token_url, self.userinfo_url = authorize_page, token_url, userinfo_url
         self.client_id, self.redirect_uri, self.transport = client_id, redirect_uri, transport
     def begin(self, scopes=('profile',)):
-        if tuple(scopes) not in [('profile',), ('profile', 'email')]:
+        if tuple(scopes) not in [('profile',), ('profile', 'email'), SCOPES]:
             raise FriendomError('Unsupported local scope request')
         verifier = secrets.token_urlsafe(48)
         state = secrets.token_urlsafe(32)
@@ -42,11 +43,11 @@ class FriendomAdapter:
             raise FriendomError('Invalid code')
         token = self.transport('POST', self.token_url, {'grant_type': 'authorization_code', 'client_id': self.client_id, 'redirect_uri': self.redirect_uri, 'code': code, 'code_verifier': pending['verifier']}, {})
         expected = pending.get('scopes', ['profile'])
-        if expected not in [['profile'], ['profile', 'email']]:
+        if expected not in [['profile'], ['profile', 'email'], list(SCOPES)]:
             raise FriendomError('Invalid pending scopes')
         if not isinstance(token, dict) or token.get('token_type', '').lower() != 'bearer' or not isinstance(token.get('access_token'), str) or not 1 <= len(token['access_token']) <= 256 or set(token.get('scope', '').split()) != set(expected):
             raise FriendomError('Invalid token response')
-        user = self.transport('GET', self.userinfo_url, None, {'Authorization': 'Bearer ' + token['access_token']})
+        user = self.transport('GET', self.userinfo_url, None, {'Authorization': 'Bearer ' + token['access_token'],'X-OAuth-Client-ID':self.client_id})
         if not isinstance(user, dict) or not isinstance(user.get('sub'), str) or not re.fullmatch(r'sermo:[1-9][0-9]*:[1-9][0-9]*', user['sub']):
             raise FriendomError('Invalid stable subject')
         # Never automatically link an existing local email account from nickname/avatar.
@@ -77,6 +78,11 @@ class FriendomAdapter:
             result['space_slug'] = user['space_slug'][:100]
         if user.get('space_admin') is True:
             result['space_admin'] = True
+        if expected == list(SCOPES):
+            ttl=token.get('expires_in')
+            if (type(ttl)is not int or not 1<=ttl<=3600 or not re.fullmatch(r'[A-Za-z0-9_-]{43}',token['access_token'])
+                or len(token['scope'].split())!=len(SCOPES) or not result.get('verified_email')): raise FriendomError('Invalid collaboration token')
+            result['_collaboration_token']={'token':token['access_token'],'ttl':ttl,'scopes':list(SCOPES)}
         return result
 
 

@@ -22,3 +22,6 @@ urlpatterns += [path('api/groups/<int:group_id>/lifecycle/', group_lifecycle.lif
 
 from core import chat_views
 urlpatterns += [path('api/groups/<int:group_id>/chat/status/',chat_views.status),path('api/groups/<int:group_id>/chat/connection/',chat_views.connection),path('api/groups/<int:group_id>/chat/room/',chat_views.room),path('api/groups/<int:group_id>/chat/messages/',chat_views.messages),path('api/groups/<int:group_id>/chat/events/',chat_views.events)]
+
+from core import collaboration
+urlpatterns += [path('api/groups/<int:group_id>/chat/collaboration/',collaboration.endpoint)]

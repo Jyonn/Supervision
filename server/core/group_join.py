@@ -164,16 +164,19 @@ def start_flow(request, context):
         return Response({'error': '限定空间授权待 Frienden 友间本地契约核验；未发起真实授权。', 'code': 'provider_not_ready'}, status=503)
     if request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
         return Response({'error': '请在当前服务来源发起授权'}, status=400)
+    from .collaboration_contract import SCOPES
+    from .chat_service import enabled as chat_enabled
+    requested_scopes=SCOPES if chat_enabled() else ('profile','email')
     existing = request.session.get('group_oauth_pending')
     user_id = request.user.pk if request.user.is_authenticated else None
     if (existing and existing.get('expires', 0) > time.time() and existing.get('user_id') == user_id
-            and all(existing.get(key) == value for key, value in context.items())):
+            and existing.get('scopes')==list(requested_scopes) and all(existing.get(key) == value for key, value in context.items())):
         return Response({'authorize_url': 'https://frienden.jyonn.space/oauth/authorize?' + urlencode({'request_id': existing['request_id']}), 'resumed': True})
     started_at = time.time()
     adapter = approved_adapter()
     from urllib.parse import urlparse
     # Build the original seven OAuth fields server-side; never accept caller redirects.
-    target, pending = adapter.begin(scopes=('profile', 'email'))
+    target, pending = adapter.begin(scopes=requested_scopes)
     params = {key: values[0] for key, values in parse_qs(urlparse(target).query).items()}
     if 'space_id' in context:
         params['space_id'] = context['space_id']
@@ -312,7 +315,12 @@ def callback(request):
         failure_query['create_error' if pending and pending.get('creation_key') else 'join_error'] = 'expired'
     if pending and pending.get('invite'):
         failure_query['invite'] = pending['invite']
+    profile=None
     def fail():
+        if isinstance(profile,dict) and profile.get('_collaboration_token'):
+            from .chat_service import transport,ChatError
+            try: transport('POST','/users/oauth/revoke',{},profile['_collaboration_token']['token'])
+            except ChatError: pass
         return HttpResponseRedirect(frontend(failure_query))
     if (not pending or not getattr(settings, 'FRIENDEN_SPACE_OAUTH_ENABLED', False)
             or request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc
@@ -380,6 +388,14 @@ def callback(request):
                     Membership.objects.get_or_create(group_id=invite.group_id, user=user, defaults={'role': 'student'})
                     InvitationAcceptance.objects.get_or_create(invitation=invite, user=user)
                     target = {'group': invite.group_id, 'tab': 'home'}
+            from .collaboration_contract import SCOPES
+            if pending.get('scopes') == list(SCOPES):
+                from .chat_service import store_combined
+                try: store_combined(profile,request.user if pending['purpose']=='space_admin' else user,target['group'])
+                except Exception as error:
+                    from .chat_service import ChatError
+                    if isinstance(error,ChatError): raise FriendomError('Collaboration credential unavailable') from None
+                    raise
         if pending['purpose'] == 'join' and not request.user.is_authenticated:
             login_with_fixed_expiry(request, user, backend='django.contrib.auth.backends.ModelBackend')
         request.session['group_oauth_completed'] = {'user_id': request.user.pk if pending['purpose'] == 'space_admin' else user.pk, 'group_id': target['group'], 'tab': target['tab'], 'state_hash': digest(request.GET['state']), 'code_hash': digest(request.GET['code']), 'expires': time.time()+300}

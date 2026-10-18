@@ -34,5 +34,16 @@ ctx.fetch=async(url,options)=>{
  mode='deferred';const waiting=vm.runInContext('pollGroupChat()',ctx);await new Promise(r=>setImmediate(r));const signal=lastSignal;vm.runInContext('stopGroupChat();currentGroupId=20;',ctx);assert.equal(signal.aborted,true);pendingResolve();await waiting;assert.equal(vm.runInContext('groupChat.messages.length',ctx),0);
  mode='ready';await vm.runInContext('openGroupChat()',ctx);vm.runInContext("groupChat.draft='私密草稿';groupChat.sendKey='fictional-key'",ctx);mode='revoked';await vm.runInContext('pollGroupChat()',ctx);assert.equal(vm.runInContext('groupChat.phase',ctx),'blocked');assert.equal(vm.runInContext('groupChat.messages.length',ctx),0);assert.equal(vm.runInContext('groupChat.draft',ctx),'');
  mode='wrong-user';await vm.runInContext('openGroupChat()',ctx);assert.equal(booted,1);assert.equal(vm.runInContext('groupChat.messages.length',ctx),0);
+ mode='ready';await vm.runInContext('openGroupChat()',ctx);
+ const collab={friends:[{id:'102',name:'虚构学生'}],requests:[{id:'44',peer:{id:'102',name:'虚构学生'},outgoing:false,status:0}],conversations:[{id:'901',key:'c:fixture-signed',title:'虚构私聊',group:false,members:[{id:'101'},{id:'102'}]}],peers:[{id:'102',name:'虚构学生'}],invitations:[],create_group:true};
+ let collabCalls=0;const originalFetch=ctx.fetch;
+ ctx.fetch=async(url,options)=>{if(url.includes('/collaboration/')){collabCalls++;return response({viewer_id:'1',group_id:'20',...collab})}return originalFetch(url,options)};
+ await vm.runInContext('openCollaboration()',ctx);assert.match(html,/虚构私聊/);assert.match(html,/创建本组群聊/);assert.match(html,/接受/);assert.match(html,/私聊/);
+ for(const m of html.matchAll(/(?:onclick|oninput|onchange|onkeydown|onsubmit)="([^"]*)"/g))new Function('event',m[1].replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&'));
+ vm.runInContext(`groupChat.status.room={key:'c:fixture-signed',title:'虚构群',members:[{id:'101',name:'导师',role:1},{id:'102',name:'学生',role:0}],allowed_actions:['rename']};openConversationSettings()`,ctx);
+ assert.match(html,/修改群名/);assert.doesNotMatch(html,/移除成员|转让群主|限时禁言/);
+ const beforeConfirm=collabCalls;vm.runInContext(`collaborationPeerAction(0,'friend_request')`,ctx);assert.match(html,/确认发出申请/);assert.equal(collabCalls,beforeConfirm);
+ vm.runInContext(`groupChat.draft='旧会话私密草稿';groupChat.messages=[{id:'4'}];stopGroupChat()`,ctx);assert.equal(vm.runInContext('collaborationData',ctx),null);assert.equal(vm.runInContext('groupChat.draft',ctx),'');
+ console.log('PASS: collaboration directory, explicit friendship confirmation, role-limited group controls, generated handlers and switch cleanup.');
  assert.ok(rendered>0);console.log('PASS: off gate, exact BFF-only calls, escaped/64-bit-safe history, current visibility events, explicit same-key send retry, CSRF, no message storage, abort/stale group guard, revoke and account-change cleanup.');
 })().catch(error=>{console.error(error);process.exitCode=1});

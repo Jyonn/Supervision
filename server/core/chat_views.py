@@ -105,9 +105,11 @@ def query(request,kind):
     allowed={'room_key'}|({'before'} if kind=='messages' else {'after'})
     if set(request.GET)-allowed or any(len(request.GET.getlist(k))!=1 for k in request.GET): raise svc.ChatError('invalid_request')
     key=request.GET.get('room_key','')
-    try:
-        if str(uuid.UUID(key))!=key: raise ValueError
-    except (ValueError,TypeError): raise svc.ChatError('invalid_request') from None
+    if not isinstance(key,str) or len(key)>1500: raise svc.ChatError('invalid_request')
+    if not key.startswith('c:'):
+        try:
+            if str(uuid.UUID(key))!=key: raise ValueError
+        except (ValueError,TypeError): raise svc.ChatError('invalid_request') from None
     return key,svc.integer(request.GET.get('before' if kind=='messages' else 'after',0),zero=True)
 
 

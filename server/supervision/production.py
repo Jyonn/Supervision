@@ -46,6 +46,6 @@ FRIENDEN_SPACE_OAUTH_ENABLED = FRIENDOM_ENABLED and FRIENDOM_EMAIL_ENABLED
 
 FRIENDEN_SPACE_METADATA_ENABLED = FRIENDEN_SPACE_OAUTH_ENABLED
 
-# No environment opt-in yet: rollout requires a separate reviewed change.
-FRIENDEN_CHAT_ENABLED = False
+# Approved two-domain rollout; opt-in only after provider/client readiness verification.
+FRIENDEN_CHAT_ENABLED = os.environ.get('SUPERVISION_FRIENDEN_CHAT_ENABLED') == '1'
 CHAT_VAULT_DIR = PRIVATE_DATA_DIR / 'chat-vault'
