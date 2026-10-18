@@ -7,6 +7,8 @@ for(const fn of ['groupChooser()','overviewPage()','membersPage()','activityPage
 assert.match(vm.runInContext('overviewPage()',ctx),/甲组任务/);
 assert.doesNotMatch(vm.runInContext('newTaskPage()',ctx),/<select name="group_id"/);
 assert.match(vm.runInContext('routeURL("tasks")',ctx),/group=10&tab=tasks/);
+vm.runInContext("screen='detail';activeTask={id:8};editorState={kind:'report',day:'2026-10-18',owner_id:1,body:'未保存研究记录'};openProfile();",ctx);history.replaceState(null,'','/app/?group=10&tab=detail&task=8');handlers.popstate();assert.equal(vm.runInContext('editorState.body',ctx),'未保存研究记录');
+
 vm.runInContext("currentGroupId=20;screen='tasks';renderAccount()",ctx);assert.doesNotMatch(el.innerHTML,/新建任务/);assert.doesNotMatch(el.innerHTML,/<select aria-label="研究组"/);
 vm.runInContext('resetGroupContext()',ctx);assert.equal(vm.runInContext('taskItems.length',ctx),0);assert.equal(vm.runInContext('calendarState.meetings.length',ctx),0);
 (async()=>{
