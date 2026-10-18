@@ -56,7 +56,7 @@ class FriendomAdapter:
             parsed = urlsplit(avatar)
             if parsed.scheme == 'https' and parsed.hostname in ['api.sermo.jyonn.space', 'sermo.jyonn.space'] and not parsed.username and not parsed.password and parsed.port in [None, 443]:
                 safe_avatar = avatar
-        result = {'provider': 'friendom', 'subject': user['sub'], 'name': str(user.get('nickname', 'Frienden 用户'))[:80], 'avatar_url': safe_avatar}
+        result = {'provider': 'friendom', 'subject': user['sub'], 'name': str(user.get('nickname', 'Frienden 友间用户'))[:80], 'avatar_url': safe_avatar}
         if 'email' in expected:
             from django.core.validators import validate_email
             from django.core.exceptions import ValidationError
@@ -97,7 +97,10 @@ def http_transport(method, url, body, headers):
                 and parsed.path == '/users/oauth/metadata' and not parsed.fragment
                 and set(query) == {'request_id'} and len(query['request_id']) == 1
                 and re.fullmatch(r'[A-Za-z0-9_-]{43}', query['request_id'][0]))
-    if url not in approved and not metadata:
+    lookup = (method == 'GET' and parsed.scheme == 'https' and parsed.netloc == 'api.sermo.jyonn.space'
+              and parsed.path == '/spaces/lookup' and not parsed.fragment and set(query) == {'slug'}
+              and len(query['slug']) == 1 and len(query['slug'][0]) <= 100)
+    if url not in approved and not metadata and not lookup:
         raise FriendomError('Unapproved provider endpoint')
     request = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None,
                                      headers={'Accept': 'application/json', 'Content-Type': 'application/json', **headers}, method=method)

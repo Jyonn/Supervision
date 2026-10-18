@@ -250,9 +250,42 @@ class GroupWorkspaceTests(TestCase):
     def test_metadata_resolution_validates_target_and_does_not_authorize(self):
         from .group_join import space_metadata
         frozen={'request_id':'m'*43}
-        with patch('core.group_join.http_transport',side_effect=[frozen,{'target_space':{'id':12,'slug':'sample','name':'虚构空间'}}]) as transport:
+        with patch('core.group_join.http_transport',side_effect=[frozen,{'target_space':{'id':12,'slug':'sample','name':'虚构空间'}},{'body':{'space_id':12,'slug':'sample','name':'虚构空间','official_user':{'avatar_uri':'https://res.6-79.cn/sermo/avatar/space.png'}}}]) as transport:
             self.assertEqual(space_metadata(12)['slug'],'sample')
-            self.assertEqual(transport.call_count,2)
-            self.assertIn('/oauth/metadata?request_id=',transport.call_args.args[1])
+            self.assertEqual(transport.call_count,3)
+            self.assertIn('/spaces/lookup?slug=sample',transport.call_args.args[1])
         with patch('core.group_join.http_transport',side_effect=[frozen,{'target_space':{'id':99,'slug':'other','name':'错误空间'}}]):
             with self.assertRaises(FriendomError):space_metadata(12)
+    def test_space_avatar_is_official_space_resource_not_authorizer_avatar(self):
+        from .group_join import public_space_metadata, safe_space_avatar
+        uri='https://res.6-79.cn/sermo/avatar/space.png'
+        with patch('core.group_join.http_transport',return_value={'body':{'space_id':12,'slug':'lab','name':'虚构空间','avatar_uri':'https://evil.test/personal.png','official_user':{'avatar_uri':uri}}}):
+            self.assertEqual(public_space_metadata(12,'lab')['avatar_url'],uri)
+        for value in ['javascript:alert(1)','https://evil.test/sermo/avatar/x.png','https://res.6-79.cn@evil.test/sermo/avatar/x','http://res.6-79.cn/sermo/avatar/x','https://res.6-79.cn/private/x','https://res.6-79.cn:443/sermo/avatar/x']:
+            self.assertEqual(safe_space_avatar(value),'')
+    def test_groups_and_binding_share_space_avatar_without_touching_personal_profile(self):
+        uri='https://res.6-79.cn/sermo/avatar/space.png'
+        self.binding.space_avatar_url=uri;self.binding.space_slug='lab';self.binding.space_name='虚构空间';self.binding.metadata_at=timezone.now();self.binding.save()
+        group=next(g for g in self.client.get('/api/groups/').json() if g['id']==self.a.id)
+        self.assertEqual(group['space_avatar_url'],uri)
+        self.assertEqual(self.client.get(f'/api/groups/{self.a.id}/space/').json()['space_avatar_url'],uri)
+        self.teacher.refresh_from_db();self.assertEqual(self.teacher.first_name,'虚构导师')
+    @override_settings(FRIENDEN_SPACE_METADATA_ENABLED=True)
+    def test_public_metadata_failure_keeps_cached_binding(self):
+        self.binding.space_name='虚构空间';self.binding.space_slug='lab';self.binding.save()
+        with patch('core.group_join.public_space_metadata',side_effect=FriendomError('Unavailable')):
+            response=self.client.get(f'/api/groups/{self.a.id}/space/').json()
+        self.assertEqual(response['space_name'],'虚构空间');self.assertEqual(response['space_slug'],'lab')
+        self.binding.refresh_from_db();self.assertEqual(self.binding.space_id,12)
+    def test_card_is_branded_self_contained_and_has_one_expiry(self):
+        import xml.etree.ElementTree as ET
+        self.a.name='虚构 & <长名称> '+('研究空间'*10);self.a.save()
+        result=self.invite();svg=result['card_svg'];ET.fromstring(svg)
+        self.assertIn('M19 29h7',svg)  # Exact path from the actual bench brand asset.
+        self.assertEqual(svg.count('有效至'),1);self.assertEqual(svg.count('Frienden 友间'),1)
+        self.assertNotIn('<script',svg);self.assertNotIn('href="https:',svg)
+        self.assertIn('width="540" height="660"',svg)
+    def test_space_lookup_does_not_accept_changed_target(self):
+        from .group_join import public_space_metadata
+        with patch('core.group_join.http_transport',return_value={'body':{'space_id':13,'slug':'lab','name':'other'}}):
+            with self.assertRaises(FriendomError):public_space_metadata(12,'lab')

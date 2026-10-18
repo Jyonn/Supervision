@@ -22,6 +22,8 @@ class GroupSpaceBinding(models.Model):
     space_id = models.PositiveBigIntegerField()
     space_slug = models.CharField(max_length=100, blank=True)
     space_name = models.CharField(max_length=200, blank=True)
+    space_avatar_url = models.URLField(max_length=2048, blank=True)
+    metadata_at = models.DateTimeField(null=True, blank=True)
     admin_subject = models.CharField(max_length=100)
     revision = models.PositiveIntegerField(default=1)
     verified_at = models.DateTimeField()

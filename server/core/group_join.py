@@ -85,15 +85,8 @@ def binding(request, group_id):
     saved = GroupSpaceBinding.objects.filter(group_id=group_id).first()
     current = binding_for(group_id)
     if request.method == 'GET':
-        if saved and (not saved.space_slug or not saved.space_name) and getattr(settings, 'FRIENDEN_SPACE_METADATA_ENABLED', False):
-            try:
-                info = space_metadata(saved.space_id)
-                saved.space_slug, saved.space_name = info['slug'], info['name']
-                saved.save(update_fields=['space_slug', 'space_name'])
-            except FriendomError:
-                pass
-        return Response({'bound': bool(saved), 'verified': bool(current),
-                         'space_slug': saved.space_slug if saved else '', 'space_name': saved.space_name if saved else '',
+        info = binding_display(saved)
+        return Response({'bound': bool(saved), 'verified': bool(current), **info,
                          'revision': saved.revision if saved else None,
                          'provider_ready': getattr(settings, 'FRIENDEN_SPACE_OAUTH_ENABLED', False)})
     mentor(group_id, request.user)
@@ -104,6 +97,45 @@ def binding(request, group_id):
     if saved:
         context['space_id'] = saved.space_id
     return start_flow(request, context)
+
+
+def safe_space_avatar(value):
+    """The provider defines its space avatar as space.official_user.avatar_uri.
+    This is NOT the authorizing person's avatar. Never proxy caller-supplied URLs.
+    """
+    if not isinstance(value, str) or len(value) > 2048:
+        return ''
+    parsed = urlsplit(value)
+    if (parsed.scheme == 'https' and parsed.netloc in {'res.6-79.cn', 'api.sermo.jyonn.space', 'frienden.jyonn.space'}
+            and not parsed.fragment and parsed.path.startswith(('/sermo/avatar/', '/assets/', '/avatars/'))):
+        return value
+    return ''
+
+
+def public_space_metadata(space_id, slug):
+    response = http_transport('GET', 'https://api.sermo.jyonn.space/spaces/lookup?' + urlencode({'slug': slug}), None, {})
+    data = response.get('body') if isinstance(response, dict) else None
+    if (not isinstance(data, dict) or type(data.get('space_id')) is not int or data['space_id'] != space_id
+            or data.get('slug') != slug or not isinstance(data.get('name'), str) or not 1 <= len(data['name']) <= 200):
+        raise FriendomError('Space metadata does not match binding')
+    official = data.get('official_user')
+    return {'slug': slug, 'name': data['name'], 'avatar_url': safe_space_avatar(official.get('avatar_uri')) if isinstance(official, dict) else ''}
+
+
+def binding_display(binding, refresh=True):
+    if not binding:
+        return {'space_name': '', 'space_slug': '', 'space_avatar_url': ''}
+    if (refresh and getattr(settings, 'FRIENDEN_SPACE_METADATA_ENABLED', False)
+            and (not binding.metadata_at or binding.metadata_at < timezone.now()-timedelta(hours=6))):
+        try:
+            info = public_space_metadata(binding.space_id, binding.space_slug) if binding.space_slug else space_metadata(binding.space_id)
+            binding.space_name, binding.space_slug = info['name'], info['slug']
+            binding.space_avatar_url = info.get('avatar_url', '')
+            binding.metadata_at = timezone.now()
+            binding.save(update_fields=['space_name', 'space_slug', 'space_avatar_url', 'metadata_at'])
+        except FriendomError:
+            pass
+    return {'space_name': binding.space_name, 'space_slug': binding.space_slug, 'space_avatar_url': safe_space_avatar(binding.space_avatar_url)}
 
 
 def space_metadata(space_id):
@@ -124,12 +156,12 @@ def space_metadata(space_id):
             or not info['slug'] or len(info['slug']) > 100 or not isinstance(info.get('name'), str)
             or not info['name'] or len(info['name']) > 200):
         raise FriendomError('Invalid space metadata')
-    return info
+    return public_space_metadata(space_id, info['slug'])
 
 
 def start_flow(request, context):
     if not getattr(settings, 'FRIENDEN_SPACE_OAUTH_ENABLED', False):
-        return Response({'error': '限定空间授权待 Frienden 本地契约核验；未发起真实授权。', 'code': 'provider_not_ready'}, status=503)
+        return Response({'error': '限定空间授权待 Frienden 友间本地契约核验；未发起真实授权。', 'code': 'provider_not_ready'}, status=503)
     if request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
         return Response({'error': '请在当前服务来源发起授权'}, status=400)
     existing = request.session.get('group_oauth_pending')
@@ -182,7 +214,7 @@ def invitations(request, group_id):
     with transaction.atomic():
         b = GroupSpaceBinding.objects.select_for_update().filter(group_id=group_id, active=True, expires_at__gt=timezone.now()).first()
         if not b:
-            raise APIError('先由导师验证 Frienden 空间管理员身份，再创建邀请')
+            raise APIError('先由导师验证 Frienden 友间空间管理员身份，再创建邀请')
         token = secrets.token_urlsafe(32)
         invite = GroupInvitation.objects.create(group_id=group_id, token_hash=digest(token), binding_revision=b.revision,
                                                expires_at=min(timezone.now()+timedelta(days=7), b.expires_at), created_by=request.user)
@@ -200,10 +232,10 @@ def join(request, token):
     invite, b = active_invitation(token)
     if request.method == 'GET':
         return Response({'group_name': invite.group.name, 'mentor_name': invite.created_by.first_name,
-                         'space_name': b.space_name, 'space_slug': b.space_slug, 'expires_at': invite.expires_at,
+                         **binding_display(b), 'expires_at': invite.expires_at,
                          'provider_ready': getattr(settings, 'FRIENDEN_SPACE_OAUTH_ENABLED', False)})
     if request.data.get('consent') is not True or set(request.data) != {'consent'}:
-        raise APIError('请确认通过指定 Frienden 空间验证身份并加入本组')
+        raise APIError('请确认通过指定 Frienden 友间空间验证身份并加入本组')
     return start_flow(request, {'purpose': 'join', 'invite': token, 'group_id': invite.group_id,
                                 'space_id': b.space_id, 'revision': b.revision})
 
@@ -355,21 +387,67 @@ def callback(request):
         return fail()
 
 
+def space_avatar_data(binding):
+    """Optional bounded raster from the provider-owned avatar host; no redirects."""
+    if not binding or not getattr(settings, 'FRIENDEN_SPACE_METADATA_ENABLED', False):
+        return ''
+    url = safe_space_avatar(binding.space_avatar_url)
+    if not url:
+        return ''
+    import urllib.request
+    import base64
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    try:
+        with urllib.request.build_opener(NoRedirect).open(url, timeout=4) as response:
+            raw = response.read(262145)
+            if len(raw) > 262144:
+                return ''
+            kind = 'image/png' if raw.startswith(b'\x89PNG\r\n\x1a\n') else 'image/jpeg' if raw.startswith(b'\xff\xd8\xff') else 'image/webp' if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP' else ''
+            return 'data:'+kind+';base64,'+base64.b64encode(raw).decode() if kind else ''
+    except (OSError, ValueError):
+        return ''
+
+
 def invitation_card(invite, url):
     import qrcode
+    import unicodedata
+    from pathlib import Path
+    from zoneinfo import ZoneInfo
     from xml.sax.saxutils import escape
+    def lines(text, width, limit):
+        result, line, count = [], '', 0
+        for char in text:
+            size = 2 if unicodedata.east_asian_width(char) in ('W','F') else 1
+            if count+size > width:
+                result.append(line); line, count = '', 0
+                if len(result) == limit:
+                    result[-1] = result[-1][:-1]+'…'; return result
+            line += char; count += size
+        if line:result.append(line)
+        return result
     qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=4)
-    qr.add_data(url)
-    qr.make(fit=True)
-    matrix = qr.get_matrix()
-    cell = 240 / len(matrix)
-    squares = ''.join(f'<rect x="{150+x*cell:.4f}" y="{208+y*cell:.4f}" width="{cell:.4f}" height="{cell:.4f}"/>' for y,row in enumerate(matrix) for x,on in enumerate(row) if on)
+    qr.add_data(url); qr.make(fit=True); matrix = qr.get_matrix()
+    cell = 300/len(matrix)
+    squares = ''.join(f'<rect x="{120+x*cell:.4f}" y="{278+y*cell:.4f}" width="{cell:.4f}" height="{cell:.4f}"/>' for y,row in enumerate(matrix) for x,on in enumerate(row) if on)
+    # Reuse the actual repository brand mark; the file is self-contained for canvas/PNG.
+    logo = (Path(settings.BASE_DIR)/'brand'/'abandon.svg').read_text().split('>',1)[1].rsplit('</svg>',1)[0]
+    binding = GroupSpaceBinding.objects.filter(group=invite.group).first()
+    space = ((binding.space_name+' @'+binding.space_slug) if binding and binding.space_slug else '已关联研究空间')
+    avatar = space_avatar_data(binding)
+    avatar_svg = f'<image x="42" y="232" width="30" height="30" preserveAspectRatio="xMidYMid slice" href="{avatar}" clip-path="url(#space-avatar)"/>' if avatar else '<rect x="42" y="232" width="30" height="30" rx="8" fill="#dce4d8"/><path d="M50 240h5v5h-5zm9 0h5v5h-5zm-9 9h5v5h-5zm9 0h5v5h-5z" fill="#60745e"/>'
+    title = ''.join(f'<text x="42" y="{176+i*36}" font-size="30" font-weight="600">{escape(line)}</text>' for i,line in enumerate(lines(invite.group.name,28,2)))
+    expiry = invite.expires_at.astimezone(ZoneInfo('Asia/Shanghai')).strftime('%m/%d %H:%M')
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="540" height="660" viewBox="0 0 540 660">
-<rect width="540" height="660" rx="28" fill="#f5eee3"/><path d="M48 75h444" stroke="#dbd0c0"/>
-<g fill="#354b3a" font-family="-apple-system,BlinkMacSystemFont,sans-serif"><text x="48" y="53" font-size="18">板凳 · Abandon</text>
-<text x="48" y="126" font-size="26">一起把想法往前推。</text><text x="48" y="166" font-size="19">{escape(invite.group.name[:22])}</text>
-<rect x="140" y="198" width="260" height="260" rx="12" fill="white"/>{squares}
-<text x="270" y="501" text-anchor="middle" font-size="17">扫码加入研究组</text>
-<text x="270" y="534" text-anchor="middle" font-size="13">在指定 Frienden 空间完成邮箱与手机认证</text>
-<text x="270" y="558" text-anchor="middle" font-size="13">已有板凳账号按已验证邮箱复用</text>
-<text x="270" y="602" text-anchor="middle" font-size="12">有效至 {invite.expires_at.strftime('%Y-%m-%d %H:%M UTC')} · 导师可随时撤销</text></g></svg>'''
+<defs><clipPath id="space-avatar"><rect x="42" y="232" width="30" height="30" rx="8"/></clipPath></defs>
+<rect width="540" height="660" rx="24" fill="#f4ebdd"/>
+<svg x="38" y="32" width="50" height="50" viewBox="0 0 64 64">{logo}</svg>
+<g fill="#304737" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,sans-serif">
+<text x="102" y="65" font-size="24" font-weight="600">板凳<tspan dx="10" font-size="18" font-weight="400">Abandon</tspan></text>
+<path d="M42 106h456" stroke="#d7cbb9"/><text x="42" y="140" font-size="14" fill="#68715f">研究组邀请</text>
+{title}{avatar_svg}<text x="82" y="252" font-size="14">{escape(lines(space,48,1)[0])}</text>
+<rect x="102" y="266" width="336" height="324" rx="16" fill="#fff"/><g shape-rendering="crispEdges">{squares}</g>
+<text x="270" y="619" text-anchor="middle" font-size="20" font-weight="500">扫码加入研究组</text>
+<text x="270" y="645" text-anchor="middle" font-size="16" fill="#68715f">有效至 {expiry}（北京时间）· Frienden 友间验证</text>
+</g></svg>'''

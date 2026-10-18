@@ -163,7 +163,14 @@ def mentor(group_id, user):
 @api_view(['GET', 'POST'])
 def groups(request):
     if request.method == 'GET':
-        return Response([{'id': m.group_id, 'name': m.group.name, 'role': m.role, 'is_owner': m.group.owner_id == request.user.pk} for m in Membership.objects.filter(user=request.user).select_related('group')])
+        from .group_join import binding_display
+        result = []
+        for m in Membership.objects.filter(user=request.user).select_related('group', 'group__groupspacebinding'):
+            binding = getattr(m.group, 'groupspacebinding', None)
+            result.append({'id': m.group_id, 'name': m.group.name, 'role': m.role,
+                           'is_owner': m.group.owner_id == request.user.pk, **binding_display(binding, refresh=False)})
+        return Response(result)
+
     from .group_join import create_group
     return create_group(request)
 
@@ -172,7 +179,7 @@ def members(request, group_id):
     membership(group_id, request.user)
     if request.method == 'POST':
         mentor(group_id, request.user)
-        raise APIValidationError('请创建邀请，由学生通过指定 Frienden 空间验证后加入')
+        raise APIValidationError('请创建邀请，由学生通过指定 Frienden 友间空间验证后加入')
     return Response([{**public_user_json(m.user), 'role': m.role} for m in Membership.objects.filter(group_id=group_id).select_related('user')])
 
 
@@ -287,7 +294,7 @@ def profile(request):
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
             raise APIValidationError('姓名长度应为 1–80 个字符')
         if source == 'friendom' and not (settings.FRIENDOM_ENABLED and FriendomIdentity.objects.filter(user=user).exclude(avatar_url='').exists()):
-            return Response({'detail': '请先连接 Frienden 并确认已设置头像'}, status=503)
+            return Response({'detail': '请先连接 Frienden 友间并确认已设置头像'}, status=503)
         if source not in ['preset', 'gravatar', 'friendom'] or type(preset) is not int or not 0 <= preset < 36:
             raise APIValidationError('头像选择无效')
         if source == 'gravatar' and (email_source == 'local' and not user.email or email_source == 'friendom' and not FriendomIdentity.objects.filter(user=user).exclude(gravatar_email_hash='').exists()):
@@ -306,7 +313,7 @@ def preset_avatar(request, preset):
 @require_http_methods(['GET'])
 def friendom_start(request):
     if not settings.FRIENDOM_ENABLED:
-        return JsonResponse({'error': 'Frienden 客户端发布尚未验证'}, status=503)
+        return JsonResponse({'error': 'Frienden 友间客户端发布尚未验证'}, status=503)
     if request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
         return HttpResponseRedirect(settings.FRIENDOM_CALLBACK_URL.replace('/callback/', '/start/'))
     from .friendom import approved_adapter
@@ -320,12 +327,12 @@ def friendom_start(request):
 @require_http_methods(['POST'])
 def friendom_email_start(request):
     if not settings.FRIENDOM_ENABLED or not settings.FRIENDOM_EMAIL_ENABLED:
-        return JsonResponse({'error': 'Frienden 邮箱权限尚待服务端上线核验；现有登录不受影响。'}, status=503)
+        return JsonResponse({'error': 'Frienden 友间邮箱权限尚待服务端上线核验；现有登录不受影响。'}, status=503)
     if not request.user.is_authenticated or request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
         return JsonResponse({'error': '请在本机账号中操作'}, status=403)
     identity = FriendomIdentity.objects.filter(user=request.user).first()
     if not identity:
-        return JsonResponse({'error': '请先连接 Frienden 身份'}, status=400)
+        return JsonResponse({'error': '请先连接 Frienden 友间身份'}, status=400)
     try:
         data = payload(request)
         if set(data) != {'external_consent'} or data.get('external_consent') is not True:
@@ -395,7 +402,7 @@ def friendom_callback(request):
                     raise FriendomError('Identity belongs to a different local account')
                 existing = FriendomIdentity.objects.filter(user=user).first()
                 if existing and existing.subject != profile['subject']:
-                    raise FriendomError('Different Frienden identity already connected')
+                    raise FriendomError('Different Frienden 友间 identity already connected')
             elif identity:
                 user = identity.user
                 if not user.is_active:
