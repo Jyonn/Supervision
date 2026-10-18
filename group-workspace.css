@@ -11,3 +11,5 @@
 @media(prefers-reduced-motion:reduce){.space-avatar *{transition:none;animation:none}}
 @media(max-width:760px) and (max-height:650px){.invitation-card-preview{width:140px}.invitation-result{gap:12px}.invitation-share-note{margin-top:6px}}
 .group-choice>span:nth-child(2){min-width:0}.group-choice b{overflow-wrap:anywhere}
+
+.join-group-card{display:flex;align-items:center;gap:14px;padding:16px;border:1px solid var(--line,#ded8cc);border-radius:12px;background:#f7f5ee;margin:24px 0 20px;min-width:0}.join-group-card>div{min-width:0}.join-group-card h2{font-size:18px;line-height:1.45;font-weight:600;margin:0;overflow-wrap:anywhere}.join-group-card p{font-size:13px;color:var(--muted,#6d7265);margin:5px 0 0}.join-group-avatar{width:46px;height:46px}.join-group-action{max-width:100%;min-height:40px;white-space:normal;text-align:center;font-size:14px;padding:10px 14px}.join-box button:focus-visible{outline:3px solid #52755c;outline-offset:3px}@media(max-width:760px){.join-box{box-sizing:border-box;min-width:0;max-width:100%;margin:0}.join-group-card{gap:12px;padding:14px}.join-group-card h2{font-size:17px}.join-group-action{width:100%;font-size:13px}}

@@ -232,7 +232,7 @@ def invitations(request, group_id):
 def join(request, token):
     invite, b = active_invitation(token)
     if request.method == 'GET':
-        return Response({'group_name': invite.group.name, 'mentor_name': invite.created_by.first_name,
+        return Response({'group_name': invite.group.name, 'member_count': Membership.objects.filter(group_id=invite.group_id).count(), 'mentor_name': invite.created_by.first_name,
                          **binding_display(b), 'expires_at': invite.expires_at,
                          'provider_ready': getattr(settings, 'FRIENDEN_SPACE_OAUTH_ENABLED', False)})
     if request.data.get('consent') is not True or set(request.data) != {'consent'}:

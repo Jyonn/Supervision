@@ -32,6 +32,18 @@ class GroupWorkspaceTests(TestCase):
         r=self.client.post(f'/api/groups/{self.a.id}/invitations/',{},content_type='application/json')
         self.assertEqual(r.status_code,201)
         return r.json()
+    def test_join_card_reports_actual_group_count_for_anonymous_and_signed_in(self):
+        token=self.invite()['token']
+        for authenticated in (False,True):
+            self.client.logout()
+            if authenticated:self.client.force_login(self.student)
+            result=self.client.get('/api/join/'+token+'/').json()
+            self.assertEqual(result['group_name'],self.a.name)
+            self.assertEqual(result['member_count'],2)
+        Membership.objects.create(group=self.a,user=self.other,role='student')
+        self.assertEqual(self.client.get('/api/join/'+token+'/').json()['member_count'],3)
+        self.assertEqual(self.client.get('/api/join/not-valid/').status_code,404)
+
     def begin(self,token,user=None):
         self.client.logout()
         if user:self.client.force_login(user)
