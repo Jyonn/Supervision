@@ -50,3 +50,14 @@ class OAuthLogRedaction(logging.Filter):
             record.args = tuple(redact(v) for v in record.args)
         record.msg = redact(record.msg)
         return True
+
+
+class PreserveLegacySessionDeadline:
+    """Pin still-valid pre-policy logins to their existing DB deadline."""
+    def __init__(self,get_response):self.get_response=get_response
+    def __call__(self,request):
+        if request.user.is_authenticated and request.session.get('_session_expiry') is None:
+            from django.contrib.sessions.models import Session
+            deadline=Session.objects.filter(session_key=request.session.session_key).values_list('expire_date',flat=True).first()
+            if deadline is not None:request.session.set_expiry(deadline)
+        return self.get_response(request)

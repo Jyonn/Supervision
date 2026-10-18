@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from datetime import date
 from pathlib import Path
 from django.conf import settings
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import authenticate, logout
 from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -22,6 +22,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError as APIValidationError
 from .models import User, ResearchGroup, Membership, ResearchTask, Entry, FriendomIdentity
 from . import mail_verification
+from .session_auth import login_with_fixed_expiry
 from .user_profiles import avatar_profile, public_user_json
 from django.utils import timezone
 
@@ -110,7 +111,7 @@ def register(request):
                 user.email_verified_at = timezone.now()
             user.set_password(password)
             user.save()
-        login(request, user)
+        login_with_fixed_expiry(request, user)
         return JsonResponse({'user': user_json(user), 'csrf': get_token(request)}, status=201)
     except IntegrityError:
         return JsonResponse({'error': '该邮箱已注册'}, status=400)
@@ -134,7 +135,7 @@ def sign_in(request):
         verified = authenticate(request, username=user.username if user else '_unknown_', password=password)
         if not verified:
             return JsonResponse({'error': '邮箱或密码不正确'}, status=400)
-        login(request, verified)
+        login_with_fixed_expiry(request, verified)
         return JsonResponse({'user': user_json(verified), 'csrf': get_token(request)})
     except ValidationError:
         return JsonResponse({'error': '邮箱或密码不正确'}, status=400)
@@ -402,7 +403,7 @@ def friendom_callback(request):
             identity.gravatar_email_hash = digest
             identity.gravatar_email_received_at = timezone.now()
             identity.save(update_fields=['gravatar_email_hash', 'gravatar_email_received_at'])
-        login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        login_with_fixed_expiry(request, user, backend='django.contrib.auth.backends.ModelBackend')
         return HttpResponseRedirect(settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/')
     except (FriendomError, IntegrityError, ValueError, KeyError):
         return failure()

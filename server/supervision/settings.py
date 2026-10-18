@@ -8,7 +8,7 @@ SECRET_KEY = get_random_secret_key()
 DEBUG = False
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'testserver']
 INSTALLED_APPS = ['django.contrib.auth', 'django.contrib.contenttypes', 'django.contrib.sessions', 'rest_framework', 'core']
-MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'django.contrib.sessions.middleware.SessionMiddleware', 'django.middleware.common.CommonMiddleware', 'django.middleware.csrf.CsrfViewMiddleware', 'django.contrib.auth.middleware.AuthenticationMiddleware', 'core.middleware.PrivateResponses', 'django.middleware.clickjacking.XFrameOptionsMiddleware']
+MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'django.contrib.sessions.middleware.SessionMiddleware', 'django.middleware.common.CommonMiddleware', 'django.middleware.csrf.CsrfViewMiddleware', 'django.contrib.auth.middleware.AuthenticationMiddleware', 'core.middleware.PreserveLegacySessionDeadline', 'core.middleware.PrivateResponses', 'django.middleware.clickjacking.XFrameOptionsMiddleware']
 ROOT_URLCONF = 'supervision.urls'
 PRIVATE_DATA_DIR = Path(tempfile.gettempdir()) / f'supervision-local-{os.getuid()}'
 PRIVATE_DATA_DIR.mkdir(mode=0o700, exist_ok=True)
@@ -24,8 +24,8 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 # Loopback HTTP only. HTTPS/Secure cookie configuration is required before any deployment.
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
-SESSION_COOKIE_AGE = 8 * 60 * 60
-SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_COOKIE_AGE = 90 * 24 * 60 * 60
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 SESSION_SAVE_EVERY_REQUEST = False
 REST_FRAMEWORK = {'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.SessionAuthentication'], 'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'], 'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer']}
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
