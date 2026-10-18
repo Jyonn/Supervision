@@ -45,3 +45,7 @@ globals().update(chronelle_config(os.environ))
 FRIENDEN_SPACE_OAUTH_ENABLED = FRIENDOM_ENABLED and FRIENDOM_EMAIL_ENABLED
 
 FRIENDEN_SPACE_METADATA_ENABLED = FRIENDEN_SPACE_OAUTH_ENABLED
+
+# No environment opt-in yet: rollout requires a separate reviewed change.
+FRIENDEN_CHAT_ENABLED = False
+CHAT_VAULT_DIR = PRIVATE_DATA_DIR / 'chat-vault'

@@ -11,7 +11,7 @@ if out.exists():
     shutil.rmtree(out)
 (out / 'assets').mkdir(parents=True)
 html = (root / 'account.html').read_text()
-for name in ['ui.js', 'avatars.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'group-workspace.js', 'group-workspace.css', 'workspace-art.svg']:
+for name in ['ui.js', 'avatars.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'group-workspace.js', 'group-workspace.css', 'chat.js', 'chat.css', 'workspace-art.svg']:
     text = (root / name).read_text()
     if name == 'account.js':
         calendar_version=hashlib.sha256((root/'calendar.js').read_bytes()).hexdigest()[:12]

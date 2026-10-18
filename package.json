@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "python3 -m http.server 4173 --bind 127.0.0.1",
-    "test": "node --check avatars.js && node --check ui.js && node --check app.js && node test.cjs && node --check account.js && node account-test.cjs && node --check calendar.js && node calendar-test.cjs && node calendar-autoauth-test.cjs && node calendar-selection-test.cjs && node --check group-workspace.js && node group-workspace-test.cjs && node group-creation-test.cjs && node invitation-test.cjs && node group-lifecycle-test.cjs",
+    "test": "node --check avatars.js && node --check ui.js && node --check app.js && node test.cjs && node --check account.js && node account-test.cjs && node --check calendar.js && node calendar-test.cjs && node calendar-autoauth-test.cjs && node calendar-selection-test.cjs && node --check group-workspace.js && node group-workspace-test.cjs && node group-creation-test.cjs && node invitation-test.cjs && node group-lifecycle-test.cjs && node --check chat.js && node chat-test.cjs",
     "start:accounts": ".venv/bin/python server/manage.py runserver 127.0.0.1:8001 --noreload",
     "start:connected": "DJANGO_SETTINGS_MODULE=supervision.local_connected .venv/bin/python server/manage.py runserver 127.0.0.1:8001 --noreload",
     "test:accounts": ".venv/bin/python server/manage.py test core"

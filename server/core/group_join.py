@@ -194,6 +194,7 @@ def start_flow(request, context):
     pending.update(context)
     pending.update({'expires': time.time() + ttl, 'user_id': request.user.pk if request.user.is_authenticated else None,
                     'request_id': rid, 'started_at': started_at})
+    request.session.pop('chat_oauth_pending', None)
     request.session.pop('friendom_pending', None)
     request.session['group_oauth_pending'] = pending
     return Response({'authorize_url': result['authorization_url']})

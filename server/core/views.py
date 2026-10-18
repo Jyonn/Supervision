@@ -263,7 +263,7 @@ def task_detail(request, task_id):
     return Response({'id': entry.id, 'saved': True})
 
 BRAND_ASSETS = {'chronelle-icon-192.png','abandon.svg','favicon-16.png','favicon-32.png','favicon.ico','apple-touch-icon.png','icon-192.png','icon-512.png','icon-maskable-512.png'}
-ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'avatars.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'group-workspace.js', 'group-workspace.css', 'workspace-art.svg'}
+ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'avatars.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'group-workspace.js', 'group-workspace.css', 'chat.js', 'chat.css', 'workspace-art.svg'}
 def asset(request, filename):
     if filename not in ASSETS:
         raise Http404
@@ -319,6 +319,7 @@ def friendom_start(request):
     from .friendom import approved_adapter
     destination, pending = approved_adapter().begin(scopes=('profile', 'email') if settings.FRIENDOM_EMAIL_ENABLED else ('profile',))
     pending.update({'expires': time.time() + 300, 'user_id': request.user.pk if request.user.is_authenticated else None})
+    request.session.pop('chat_oauth_pending', None)
     request.session.pop('group_oauth_pending', None)
     request.session['friendom_pending'] = pending
     return HttpResponseRedirect(destination)
@@ -343,6 +344,7 @@ def friendom_email_start(request):
     destination, pending = approved_adapter().begin(scopes=('profile', 'email'))
     pending.update({'expires': time.time() + 300, 'user_id': request.user.pk,
                     'purpose': 'gravatar_email', 'subject': identity.subject})
+    request.session.pop('chat_oauth_pending', None)
     request.session.pop('group_oauth_pending', None)
     request.session['friendom_pending'] = pending
     return JsonResponse({'authorize_url': destination})
@@ -350,6 +352,12 @@ def friendom_email_start(request):
 @require_http_methods(['GET'])
 @sensitive_variables('pending', 'profile')
 def friendom_callback(request):
+    from . import chat_views
+    if 'chat_oauth_pending' in request.session:
+        return chat_views.callback(request)
+    chat_completed = chat_views.completed_callback(request)
+    if chat_completed is not None:
+        return chat_completed
     from .group_join import completed_callback
     completed = completed_callback(request)
     if completed is not None:

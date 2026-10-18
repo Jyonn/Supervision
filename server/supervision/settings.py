@@ -62,3 +62,7 @@ LOGGING = {
 FRIENDEN_SPACE_OAUTH_ENABLED = False
 
 FRIENDEN_SPACE_METADATA_ENABLED = False
+
+# Chat is local-only until provider release and precise client approval.
+FRIENDEN_CHAT_ENABLED = False
+CHAT_VAULT_DIR = PRIVATE_DATA_DIR / 'chat-vault'

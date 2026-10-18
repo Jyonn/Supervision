@@ -6,7 +6,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from .models import (ResearchGroup, Membership, GroupActionReceipt, InvitationAcceptance,
-                     CalendarSharing, MeetingSyncOperation)
+                     CalendarSharing, MeetingSyncOperation, ChatCredential, ChatAuthorizationAttempt)
 
 
 @api_view(['POST'])
@@ -44,6 +44,8 @@ def lifecycle(request, group_id):
                 return Response({'error': '组主不能直接退出并留下无主组。当前可选择永久删除；转让功能尚未提供。', 'code': 'owner_cannot_leave'}, status=409)
             Membership.objects.filter(group=group, user=request.user).delete()
             CalendarSharing.objects.filter(group=group, user=request.user).delete()
+            ChatCredential.objects.filter(group=group,user=request.user).delete()
+            ChatAuthorizationAttempt.objects.filter(group=group,user=request.user).delete()
         else:
             if not owner:
                 raise PermissionDenied('仅研究组创建者／组主可以永久删除，导师角色不等于组主')
@@ -55,7 +57,7 @@ def lifecycle(request, group_id):
             InvitationAcceptance.objects.filter(invitation__group=group).delete()
             group.delete()
         GroupActionReceipt.objects.create(request_key=key, user=request.user, group_id=group_id, action=action)
-    for field in ('group_oauth_pending', 'group_oauth_completed'):
+    for field in ('group_oauth_pending', 'group_oauth_completed', 'chat_oauth_pending', 'chat_oauth_completed'):
         pending = request.session.get(field)
         if isinstance(pending, dict) and pending.get('group_id') == group_id:
             request.session.pop(field, None)

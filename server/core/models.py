@@ -192,3 +192,32 @@ class GroupCreationAttempt(models.Model):
     group_id = models.PositiveBigIntegerField(null=True)
     expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
+
+class ChatCredential(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    group = models.ForeignKey(ResearchGroup, on_delete=models.CASCADE)
+    space_id = models.PositiveBigIntegerField()
+    subject = models.CharField(max_length=100)
+    ciphertext = models.TextField(blank=True)
+    expires_at = models.DateTimeField()
+    generation = models.UUIDField(default=uuid.uuid4)
+    status = models.CharField(max_length=24, default='active')
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'group'], name='one_chat_credential_per_group_user')]
+
+class GroupChatRoom(models.Model):
+    generation = models.UUIDField(default=uuid.uuid4)
+    group = models.OneToOneField(ResearchGroup, on_delete=models.CASCADE)
+    space_id = models.PositiveBigIntegerField()
+    provider_chat_id = models.PositiveBigIntegerField()
+    title = models.CharField(max_length=160)
+    configured_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    updated_at = models.DateTimeField(auto_now=True)
+
+class ChatAuthorizationAttempt(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    group = models.ForeignKey(ResearchGroup, on_delete=models.CASCADE)
+    session_hash = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    status = models.CharField(max_length=16, default='pending')
