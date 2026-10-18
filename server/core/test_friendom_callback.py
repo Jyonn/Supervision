@@ -20,6 +20,11 @@ class FriendomCallbackTests(TestCase):
         return self.client.get('/api/auth/friendom/callback/', {'code': secrets.token_urlsafe(32), 'state': pending['state'], **extra}, **self.host)
     def test_start_uses_only_approved_client_and_callback(self):
         r=self.client.get('/api/auth/friendom/start/', **self.host)
+        self.assertEqual(urlsplit(r.url).scheme,'https')
+        self.assertEqual(urlsplit(r.url).netloc,'frienden.jyonn.space')
+        self.assertEqual(urlsplit(r.url).path,'/oauth/authorize')
+        self.assertEqual(parse_qs(urlsplit(r.url).query)['redirect_uri'],['http://127.0.0.1:8001/api/auth/friendom/callback/'])
+        self.assertEqual(parse_qs(urlsplit(r.url).query)['code_challenge_method'],['S256'])
         self.assertIn('client_id=supervision-local', r.url)
         self.assertIn('scope=profile', r.url)
         self.assertNotIn('scope=phone', r.url)

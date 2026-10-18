@@ -98,7 +98,7 @@ def http_transport(method, url, body, headers):
 
 def approved_adapter():
     from django.conf import settings
-    return FriendomAdapter(authorize_page='https://sermo.jyonn.space/oauth/authorize',
+    return FriendomAdapter(authorize_page='https://frienden.jyonn.space/oauth/authorize',
                            token_url='https://api.sermo.jyonn.space/users/oauth/token',
                            userinfo_url='https://api.sermo.jyonn.space/users/oauth/userinfo',
                            client_id=settings.FRIENDOM_CLIENT_ID,
