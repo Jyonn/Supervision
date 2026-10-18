@@ -14,6 +14,7 @@ from django.http import HttpResponseRedirect, HttpResponse
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.debug import sensitive_variables
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -68,14 +69,18 @@ def start_flow(request, context):
         return Response({'error': '限定空间授权待 Frienden 本地契约核验；未发起真实授权。', 'code': 'provider_not_ready'}, status=503)
     if request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
         return Response({'error': '请在当前服务来源发起授权'}, status=400)
+    existing = request.session.get('group_oauth_pending')
+    user_id = request.user.pk if request.user.is_authenticated else None
+    if (existing and existing.get('expires', 0) > time.time() and existing.get('user_id') == user_id
+            and all(existing.get(key) == value for key, value in context.items())):
+        return Response({'authorize_url': 'https://frienden.jyonn.space/oauth/authorize?' + urlencode({'request_id': existing['request_id']}), 'resumed': True})
     adapter = approved_adapter()
     from urllib.parse import urlparse
     # Build the original seven OAuth fields server-side; never accept caller redirects.
     target, pending = adapter.begin(scopes=('profile', 'email'))
     params = {key: values[0] for key, values in parse_qs(urlparse(target).query).items()}
     params['space_id'] = context['space_id']
-    if context['purpose'] == 'space_admin':
-        params['purpose'] = 'space_admin'
+    params['purpose'] = context['purpose']
     try:
         result = http_transport('POST', 'https://api.sermo.jyonn.space/users/oauth/requests', params, {})
         url = urlsplit(result.get('authorization_url', ''))
@@ -90,7 +95,7 @@ def start_flow(request, context):
     except (FriendomError, AttributeError, TypeError):
         return Response({'error': '空间授权暂不可用，请稍后重试'}, status=503)
     pending.update(context)
-    pending.update({'expires': time.time() + min(ttl, 300), 'user_id': request.user.pk if request.user.is_authenticated else None,
+    pending.update({'expires': time.time() + ttl, 'user_id': request.user.pk if request.user.is_authenticated else None,
                     'request_id': rid})
     request.session.pop('friendom_pending', None)
     request.session['group_oauth_pending'] = pending
@@ -180,9 +185,16 @@ def resolve_user(profile, current_user, space_id):
 
 
 @require_GET
+@sensitive_variables('pending', 'profile')
 def callback(request):
     pending = request.session.pop('group_oauth_pending', None)
     failure_query = {'join_error': 'verification_failed'}
+    if pending and pending.get('purpose') == 'space_admin':
+        failure_query.update({'group': pending['group_id'], 'tab': 'members'})
+    if request.GET.get('error') == 'access_denied':
+        failure_query['join_error'] = 'cancelled'
+    elif pending and pending.get('expires', 0) < time.time():
+        failure_query['join_error'] = 'expired'
     if pending and pending.get('invite'):
         failure_query['invite'] = pending['invite']
     def fail():

@@ -145,3 +145,68 @@ class GroupWorkspaceTests(TestCase):
             self.client.get('/api/auth/friendom/callback/',{'state':pending['state'],'code':secrets.token_urlsafe(32)},**self.host)
         self.assertEqual(self.client.session['_auth_user_id'],str(self.student.pk))
         self.assertEqual(User.objects.count(),3)
+    def test_duplicate_start_reuses_frozen_request_and_full_registration_window(self):
+        token=self.invite()['token'];p=self.begin(token)
+        self.assertGreater(p['expires']-time.time(),1700)
+        with patch('core.group_join.http_transport') as transport:
+            r=self.client.post('/api/join/'+token+'/',{'consent':True},content_type='application/json',**self.host)
+        self.assertTrue(r.json()['resumed']);transport.assert_not_called()
+        self.assertEqual(self.client.session['group_oauth_pending']['state'],p['state'])
+    def test_cancel_keeps_original_invite_and_no_membership_or_provider_exchange(self):
+        token=self.invite()['token'];p=self.begin(token)
+        with patch('core.group_join.approved_adapter') as factory:
+            r=self.client.get('/api/auth/friendom/callback/',{'error':'access_denied','state':p['state']},**self.host)
+        self.assertEqual(parse_qs(urlsplit(r.url).query)['invite'],[token])
+        self.assertIn('join_error=cancelled',r.url);factory.assert_not_called()
+        self.assertFalse(InvitationAcceptance.objects.exists())
+        self.assertNotIn('group_oauth_pending',self.client.session)
+    def test_expired_and_revoked_invitation_after_start_cannot_join(self):
+        for field in ['expires_at','revoked_at']:
+            self.client.force_login(self.teacher)
+            token=self.invite()['token'];p=self.begin(token)
+            GroupInvitation.objects.filter(token_hash=digest(token)).update(**{field:timezone.now()-timedelta(seconds=1)})
+            self.assertIn('join_error',self.complete(p).url)
+        self.assertFalse(InvitationAcceptance.objects.exists());self.assertFalse(SpaceIdentity.objects.exists())
+    def test_expired_pending_returns_original_invite_without_provider_call(self):
+        token=self.invite()['token'];p=self.begin(token)
+        p['expires']=time.time()-1;s=self.client.session;s['group_oauth_pending']=p;s.save()
+        with patch('core.group_join.approved_adapter') as factory:
+            r=self.client.get('/api/auth/friendom/callback/',{'state':p['state'],'code':secrets.token_urlsafe(32)},**self.host)
+        self.assertIn('join_error=expired',r.url);self.assertIn('invite=',r.url);factory.assert_not_called()
+    def test_full_code_exchange_rejects_wrong_state_and_unverified_email(self):
+        token=self.invite()['token'];p=self.begin(token)
+        with patch('core.friendom.http_transport') as transport:
+            r=self.client.get('/api/auth/friendom/callback/',{'state':'wrong','code':secrets.token_urlsafe(32)},**self.host)
+            self.assertIn('join_error',r.url);transport.assert_not_called()
+        p=self.begin(token)
+        with patch('core.friendom.http_transport',side_effect=[{'access_token':'synthetic','token_type':'Bearer','scope':'profile email'},{'sub':'sermo:12:2','space_id':12,'email':'student@example.test','email_verified':False,'nickname':'虚构学生'}]):
+            r=self.client.get('/api/auth/friendom/callback/',{'state':p['state'],'code':secrets.token_urlsafe(32)},**self.host)
+        self.assertIn('join_error',r.url);self.assertFalse(SpaceIdentity.objects.exists())
+    def test_full_code_exchange_joins_existing_account_and_refresh_is_safe(self):
+        Membership.objects.filter(group=self.a,user=self.student).delete()
+        token=self.invite()['token'];p=self.begin(token)
+        with patch('core.friendom.http_transport',side_effect=[{'access_token':'synthetic','token_type':'Bearer','scope':'profile email'},{'sub':'sermo:12:2','space_id':12,'email':'student@example.test','email_verified':True,'nickname':'虚构学生'}]) as transport:
+            r=self.client.get('/api/auth/friendom/callback/',{'state':p['state'],'code':secrets.token_urlsafe(32)},**self.host)
+            self.assertEqual(transport.call_count,2)
+            self.assertEqual(transport.call_args_list[0].args[2]['code_verifier'],p['verifier'])
+        self.assertIn('group='+str(self.a.id),r.url)
+        self.assertEqual(User.objects.count(),3)
+        self.assertEqual(InvitationAcceptance.objects.count(),1)
+        self.assertEqual(self.client.get('/api/tasks/',{'group_id':self.a.id}).status_code,200)
+        self.assertEqual(Membership.objects.filter(group=self.a,user=self.student).count(),1)
+    def test_admin_cancel_returns_to_same_group_and_preserves_binding(self):
+        with patch('core.group_join.http_transport',return_value={'request_id':'r'*43,'expires_in':1800,'authorization_url':'https://frienden.jyonn.space/oauth/authorize?request_id='+'r'*43}):
+            self.client.post(f'/api/groups/{self.a.id}/space/',{'space_id':12},content_type='application/json',**self.host)
+        p=self.client.session['group_oauth_pending']
+        r=self.client.get('/api/auth/friendom/callback/',{'error':'access_denied','state':p['state']},**self.host)
+        self.assertIn('group='+str(self.a.id),r.url);self.assertIn('tab=members',r.url)
+        self.assertEqual(GroupSpaceBinding.objects.get().revision,1)
+
+    def test_reauthentication_of_same_invite_is_idempotent(self):
+        token=self.invite()['token']
+        self.complete(self.begin(token))
+        self.complete(self.begin(token,self.student))
+        self.assertEqual(InvitationAcceptance.objects.count(),1)
+        self.assertEqual(Membership.objects.filter(group=self.a,user=self.student).count(),1)
+        self.assertTrue(Membership.objects.filter(group=self.b,user=self.student).exists())
+        self.assertEqual(SpaceIdentity.objects.count(),1)
