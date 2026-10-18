@@ -68,8 +68,13 @@ class FriendomAdapter:
                     validate_email(normalized)
                     if len(normalized) <= 254:
                         result['gravatar_email_hash'] = hashlib.sha256(normalized.encode()).hexdigest()
+                        result['verified_email'] = normalized
                 except ValidationError:
                     pass
+        if type(user.get('space_id')) is int and user['space_id'] > 0:
+            result['space_id'] = user['space_id']
+        if user.get('space_admin') is True:
+            result['space_admin'] = True
         return result
 
 
@@ -81,7 +86,7 @@ def http_transport(method, url, body, headers):
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
-    approved = {'https://api.sermo.jyonn.space/users/oauth/token', 'https://api.sermo.jyonn.space/users/oauth/userinfo'}
+    approved = {'https://api.sermo.jyonn.space/users/oauth/requests', 'https://api.sermo.jyonn.space/users/oauth/token', 'https://api.sermo.jyonn.space/users/oauth/userinfo'}
     if url not in approved:
         raise FriendomError('Unapproved provider endpoint')
     request = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None,

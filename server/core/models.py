@@ -17,6 +17,40 @@ class ResearchGroup(models.Model):
     name = models.CharField(max_length=100)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
 
+class GroupSpaceBinding(models.Model):
+    group = models.OneToOneField(ResearchGroup, on_delete=models.CASCADE)
+    space_id = models.PositiveBigIntegerField()
+    admin_subject = models.CharField(max_length=100)
+    revision = models.PositiveIntegerField(default=1)
+    verified_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    active = models.BooleanField(default=True)
+
+class GroupInvitation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    group = models.ForeignKey(ResearchGroup, on_delete=models.CASCADE)
+    token_hash = models.CharField(max_length=64, unique=True)
+    binding_revision = models.PositiveIntegerField()
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class SpaceIdentity(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    space_id = models.PositiveBigIntegerField()
+    subject = models.CharField(max_length=100, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'space_id'], name='one_user_space_identity')]
+
+class InvitationAcceptance(models.Model):
+    invitation = models.ForeignKey(GroupInvitation, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    accepted_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['invitation', 'user'], name='one_invitation_acceptance')]
+
 class Membership(models.Model):
     group = models.ForeignKey(ResearchGroup, on_delete=models.CASCADE, related_name='memberships')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)

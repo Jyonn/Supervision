@@ -193,6 +193,8 @@ def meeting_detail(request,meeting_id):
         if not meeting:
             raise NotFound('会议不存在')
         member(meeting.group_id,request.user)
+        if 'group_id' in request.query_params and str(meeting.group_id) != request.query_params['group_id']:
+            raise NotFound('会议不属于当前研究组')
         if meeting.organizer_id!=request.user.pk:
             raise PermissionDenied('仅发起人可更新、取消或同步会议')
         if type(request.data.get('revision')) is not int or request.data['revision']!=meeting.revision:

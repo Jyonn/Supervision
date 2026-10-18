@@ -110,7 +110,7 @@ class PermissionTests(TestCase):
         self.assertEqual(self.post('/api/tasks/', {'title': '伪造分配', 'assignee_ids': [self.two.id]}).status_code, 403)
     def make_group_task(self):
         group = self.post('/api/groups/', {'name': '测试研究组'}).json()
-        self.post(f'/api/groups/{group["id"]}/members/', {'email': self.two.email})
+        Membership.objects.create(group_id=group['id'], user=self.two, role='student')
         task = self.post('/api/tasks/', {'title': '组任务', 'group_id': group['id'], 'assignee_ids': [self.two.id]}).json()
         return group, task
     def test_membership_and_role_forgery(self):
@@ -134,7 +134,7 @@ class PermissionTests(TestCase):
         self.assertEqual(self.third.get(url).status_code, 404)
     def test_student_cannot_see_or_edit_peer_entries(self):
         group, task = self.make_group_task()
-        self.post(f'/api/groups/{group["id"]}/members/', {'email': self.three.email})
+        Membership.objects.create(group_id=group['id'], user=self.three, role='student')
         model = ResearchTask.objects.get(pk=task['id'])
         model.assignees.add(self.three)
         url = f'/api/tasks/{task["id"]}/'

@@ -57,3 +57,6 @@ LOGGING = {
     'handlers': {'local_console': {'class': 'logging.StreamHandler', 'filters': ['oauth_redaction']}},
     'loggers': {'django.server': {'handlers': ['local_console'], 'level': 'INFO', 'propagate': False}},
 }
+
+# Frozen space OAuth contract. Off until the provider and client capability are approved.
+FRIENDEN_SPACE_OAUTH_ENABLED = False

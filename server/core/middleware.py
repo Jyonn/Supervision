@@ -45,7 +45,11 @@ import re
 class OAuthLogRedaction(logging.Filter):
     def filter(self, record):
         def redact(value):
-            return re.sub(r'([A-Z]+ /api/(?:auth/friendom/callback/|calendar/authorization/callback/))\?[^ ]+', r'\1?[redacted]', value) if isinstance(value, str) else value
+            if not isinstance(value, str):
+                return value
+            value = re.sub(r'(/api/join/)[^/?\s]+', r'\1[redacted]', value)
+            value = re.sub(r'([A-Z]+ /(?:app/)?\?)[^ ]*invite=[^ ]+', r'\1[redacted]', value)
+            return re.sub(r'([A-Z]+ /api/(?:auth/friendom/callback/|calendar/authorization/callback/))\?[^ ]+', r'\1?[redacted]', value)
         if isinstance(record.args, tuple):
             record.args = tuple(redact(v) for v in record.args)
         record.msg = redact(record.msg)

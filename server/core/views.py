@@ -177,21 +177,12 @@ def members(request, group_id):
     membership(group_id, request.user)
     if request.method == 'POST':
         mentor(group_id, request.user)
-        if set(request.data) - {'email'}:
-            raise APIValidationError('成员只能以学生身份添加')
-        try:
-            email = valid_email(request.data.get('email'))
-        except ValidationError:
-            raise APIValidationError('邮箱格式无效')
-        user = User.objects.filter(email=email).first()
-        if not user:
-            raise APIValidationError('该邮箱尚未在本地注册')
-        Membership.objects.get_or_create(group_id=group_id, user=user, defaults={'role': 'student'})
+        raise APIValidationError('请创建邀请，由学生通过指定 Frienden 空间验证后加入')
     return Response([{**public_user_json(m.user), 'role': m.role} for m in Membership.objects.filter(group_id=group_id).select_related('user')])
 
 
 def visible_tasks(user):
-    return ResearchTask.objects.filter(Q(assignees=user) | Q(group__memberships__user=user, group__memberships__role='mentor')).distinct()
+    return ResearchTask.objects.filter(Q(group__isnull=True, assignees=user) | Q(group__memberships__user=user, assignees=user) | Q(group__memberships__user=user, group__memberships__role='mentor')).distinct()
 
 
 def task_json(task, user):
@@ -202,7 +193,15 @@ def task_json(task, user):
 @api_view(['GET', 'POST'])
 def tasks(request):
     if request.method == 'GET':
-        return Response([task_json(t, request.user) for t in visible_tasks(request.user).order_by('-id')])
+        items = visible_tasks(request.user)
+        if 'group_id' in request.query_params:
+            try:
+                group_id = int(request.query_params['group_id'])
+            except (ValueError, TypeError):
+                raise APIValidationError('研究组编号无效')
+            membership(group_id, request.user)
+            items = items.filter(group_id=group_id)
+        return Response([task_json(t, request.user) for t in items.order_by('-id')])
     if set(request.data) - {'title', 'description', 'group_id', 'assignee_ids'}:
         raise APIValidationError('不支持的任务字段')
     title = request.data.get('title', '')
@@ -232,6 +231,8 @@ def task_detail(request, task_id):
     task = visible_tasks(request.user).filter(pk=task_id).first()
     if not task:
         raise NotFound('任务不存在')
+    if 'group_id' in request.query_params and str(task.group_id) != request.query_params['group_id']:
+        raise NotFound('任务不属于当前研究组')
     if request.method == 'GET':
         return Response(task_json(task, request.user))
     if set(request.data) - {'kind', 'day', 'body', 'owner_id'}:
@@ -260,7 +261,7 @@ def task_detail(request, task_id):
     return Response({'id': entry.id, 'saved': True})
 
 BRAND_ASSETS = {'chronelle-icon-192.png','abandon.svg','favicon-16.png','favicon-32.png','favicon.ico','apple-touch-icon.png','icon-192.png','icon-512.png','icon-maskable-512.png'}
-ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'avatars.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'workspace-art.svg'}
+ASSETS = BRAND_ASSETS | {'site.webmanifest','runtime.js', 'ui.js', 'avatars.js', 'ui.css', 'workspace.css', 'style.css', 'account.css', 'account.js', 'calendar.js', 'markdown.js', 'group-workspace.js', 'group-workspace.css', 'workspace-art.svg'}
 def asset(request, filename):
     if filename not in ASSETS:
         raise Http404
@@ -316,6 +317,7 @@ def friendom_start(request):
     from .friendom import approved_adapter
     destination, pending = approved_adapter().begin(scopes=('profile', 'email') if settings.FRIENDOM_EMAIL_ENABLED else ('profile',))
     pending.update({'expires': time.time() + 300, 'user_id': request.user.pk if request.user.is_authenticated else None})
+    request.session.pop('group_oauth_pending', None)
     request.session['friendom_pending'] = pending
     return HttpResponseRedirect(destination)
 
@@ -339,12 +341,16 @@ def friendom_email_start(request):
     destination, pending = approved_adapter().begin(scopes=('profile', 'email'))
     pending.update({'expires': time.time() + 300, 'user_id': request.user.pk,
                     'purpose': 'gravatar_email', 'subject': identity.subject})
+    request.session.pop('group_oauth_pending', None)
     request.session['friendom_pending'] = pending
     return JsonResponse({'authorize_url': destination})
 
 @require_http_methods(['GET'])
 @sensitive_variables('pending', 'profile')
 def friendom_callback(request):
+    if 'group_oauth_pending' in request.session:
+        from .group_join import callback
+        return callback(request)
     # Consume before validation: one callback attempt per pending flow.
     pending = request.session.pop('friendom_pending', None)
     def failure():
@@ -365,6 +371,15 @@ def friendom_callback(request):
         profile = approved_adapter().complete(code=request.GET['code'], state=request.GET['state'], pending=pending)
         with transaction.atomic():
             identity = FriendomIdentity.objects.select_related('user').filter(subject=profile['subject']).first()
+            from .models import SpaceIdentity
+            space_identity = SpaceIdentity.objects.select_related('user').filter(subject=profile['subject']).first()
+            if not email_flow and identity is None and space_identity:
+                user = space_identity.user
+                if not user.is_active or (pending.get('user_id') is not None and pending['user_id'] != user.pk):
+                    raise FriendomError('Identity belongs to a different local account')
+                if not request.user.is_authenticated:
+                    login_with_fixed_expiry(request, user, backend='django.contrib.auth.backends.ModelBackend')
+                return HttpResponseRedirect(settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/')
             if email_flow:
                 if not identity or identity.user_id != request.user.pk or profile['subject'] != pending.get('subject'):
                     raise FriendomError('Email grant must match the connected identity')
