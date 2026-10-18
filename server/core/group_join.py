@@ -184,6 +184,21 @@ def resolve_user(profile, current_user, space_id):
     return user
 
 
+def completed_callback(request):
+    """A repeated browser return can acknowledge completion, never exchange twice."""
+    receipt = request.session.get('group_oauth_completed')
+    if (not receipt or not request.user.is_authenticated
+            or receipt.get('user_id') != request.user.pk or receipt.get('expires', 0) < time.time()
+            or request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc
+            or set(request.GET) != {'state', 'code'}
+            or any(len(request.GET.getlist(key)) != 1 for key in ('state', 'code'))
+            or not secrets.compare_digest(receipt.get('state_hash', ''), digest(request.GET['state']))
+            or not secrets.compare_digest(receipt.get('code_hash', ''), digest(request.GET['code']))
+            or not Membership.objects.filter(group_id=receipt['group_id'], user=request.user).exists()):
+        return None
+    return HttpResponseRedirect(frontend({'group': receipt['group_id'], 'tab': receipt['tab']}))
+
+
 @require_GET
 @sensitive_variables('pending', 'profile')
 def callback(request):
@@ -237,6 +252,7 @@ def callback(request):
                 target = {'group': invite.group_id, 'tab': 'home'}
         if pending['purpose'] == 'join' and not request.user.is_authenticated:
             login_with_fixed_expiry(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        request.session['group_oauth_completed'] = {'user_id': request.user.pk if pending['purpose'] == 'space_admin' else user.pk, 'group_id': target['group'], 'tab': target['tab'], 'state_hash': digest(request.GET['state']), 'code_hash': digest(request.GET['code']), 'expires': time.time()+300}
         return HttpResponseRedirect(frontend(target))
     except (FriendomError, IntegrityError, ValidationError, APIError, NotFound, PermissionDenied, ValueError, KeyError):
         return fail()

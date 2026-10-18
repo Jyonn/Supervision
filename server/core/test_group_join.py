@@ -210,3 +210,18 @@ class GroupWorkspaceTests(TestCase):
         self.assertEqual(Membership.objects.filter(group=self.a,user=self.student).count(),1)
         self.assertTrue(Membership.objects.filter(group=self.b,user=self.student).exists())
         self.assertEqual(SpaceIdentity.objects.count(),1)
+
+    def test_duplicate_exact_callback_restores_group_without_exchange_or_session_extension(self):
+        token=self.invite()['token'];p=self.begin(token)
+        code=secrets.token_urlsafe(32)
+        with patch('core.group_join.approved_adapter') as factory:
+            factory.return_value.complete.return_value={'subject':'sermo:12:2','space_id':12,'name':'虚构学生','verified_email':'student@example.test'}
+            first=self.client.get('/api/auth/friendom/callback/',{'state':p['state'],'code':code},**self.host)
+        deadline=self.client.session['_session_expiry']
+        with patch('core.group_join.approved_adapter') as factory, patch('core.friendom.approved_adapter') as legacy:
+            second=self.client.get('/api/auth/friendom/callback/',{'state':p['state'],'code':code},**self.host)
+            self.assertEqual(second.url,first.url);factory.assert_not_called();legacy.assert_not_called()
+        self.assertEqual(InvitationAcceptance.objects.count(),1)
+        self.assertEqual(self.client.session['_session_expiry'],deadline)
+        Membership.objects.filter(group=self.a,user=self.student).delete()
+        self.assertIn('error',self.client.get('/api/auth/friendom/callback/',{'state':p['state'],'code':code},**self.host).url)

@@ -348,6 +348,10 @@ def friendom_email_start(request):
 @require_http_methods(['GET'])
 @sensitive_variables('pending', 'profile')
 def friendom_callback(request):
+    from .group_join import completed_callback
+    completed = completed_callback(request)
+    if completed is not None:
+        return completed
     if 'group_oauth_pending' in request.session:
         from .group_join import callback
         return callback(request)
