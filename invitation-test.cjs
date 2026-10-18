@@ -13,7 +13,7 @@ const button={disabled:false,isConnected:true};ctx.button=button;
  vm.runInContext('navigator.clipboard.writeText=async()=>{throw Error("unavailable")}',ctx);await vm.runInContext('copyInvitationLink(button)',ctx);assert.equal(selected,true);
  await vm.runInContext('revokeInvitation(invitationPreview.id,button)',ctx);assert.equal(deletes,1);assert.match(options.html,/邀请已撤销/);assert.doesNotMatch(options.html,/download=|invitation-link/);assert.equal(vm.runInContext('invitationPreview.join_url',ctx),'');
  await vm.runInContext('makeInvitation(button)',ctx);assert.equal(posts,2);assert.match(options.html,/分享|invitation-share/);
- vm.runInContext('invitationPreview.expires_at="2000-01-01T00:00:00Z";showInvitationResult()',ctx);assert.match(options.html,/邀请已过期/);assert.doesNotMatch(options.html,/download=|invitation-link/);
+ vm.runInContext('invitationPreview.expires_at="2000-01-01T00:00:00Z";showInvitationResult()',ctx);assert.match(options.html,/邀请已过期/);assert.match(options.html,/onclick="openInvitationSettings\(\)">继续邀请/);assert.doesNotMatch(options.html,/download=|invitation-link/);
  vm.runInContext('disposeInvitationPreview()',ctx);assert.equal(vm.runInContext('invitationPreview',ctx),null);assert.ok(revoked.length>=4);
  const old=options;vm.runInContext('currentGroupId=2;showInvitationResult()',ctx);assert.equal(options,old);
  vm.runInContext('currentGroupId=1;api=testAPI;',ctx);await vm.runInContext('openInvitationSettings()',ctx);
