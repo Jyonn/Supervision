@@ -35,13 +35,6 @@ class PersistentSessionTests(TestCase):
         before=timezone.now();self.assert_deadline(self.register(),before)
         self.post('/api/logout/',{})
         before=timezone.now();self.assert_deadline(self.post('/api/login/',{'email':'synthetic-session@example.test','password':self.password}),before)
-    @patch('core.friendom.http_transport')
-    def test_frienden_login_uses_same_persistent_deadline(self,transport):
-        self.client.get('/api/auth/friendom/start/',secure=True)
-        pending=self.client.session['friendom_pending']
-        transport.side_effect=[{'access_token':'synthetic-token','token_type':'Bearer','scope':'profile email'},{'sub':'sermo:1:99999','nickname':'虚构会话','avatar_url':''}]
-        before=timezone.now();response=self.client.get('/api/auth/friendom/callback/',{'state':pending['state'],'code':secrets.token_urlsafe(32)},secure=True)
-        self.assert_deadline(response,before)
     def test_browsing_and_later_session_writes_do_not_extend_deadline(self):
         deadline=self.assert_deadline(self.register(),timezone.now()-timedelta(seconds=2))
         key=self.client.session.session_key
@@ -50,11 +43,8 @@ class PersistentSessionTests(TestCase):
             response=self.client.get('/api/session/',secure=True)
             self.assertIsNotNone(response.json()['user']);self.assertNotIn(settings.SESSION_COOKIE_NAME,response.cookies)
             self.assertEqual(Session.objects.get(session_key=key).expire_date,deadline)
-            response=self.client.get('/api/auth/friendom/start/',secure=True)
-            self.assertEqual(response.status_code,302)
+            session=self.client.session;session['calendar_local_hint']='synthetic';session.save()
             self.assertEqual(Session.objects.get(session_key=key).expire_date,deadline)
-            self.assertLess(int(response.cookies[settings.SESSION_COOKIE_NAME]['max-age']),7776000-86000)
-            self.assertLess(abs((parsedate_to_datetime(response.cookies[settings.SESSION_COOKIE_NAME]['expires'])-deadline).total_seconds()),2)
     def test_expired_session_is_not_revived(self):
         self.register();key=self.client.session.session_key;deadline=self.client.session.get_expiry_date()
         with patch('django.utils.timezone.now',return_value=deadline+timedelta(seconds=1)):

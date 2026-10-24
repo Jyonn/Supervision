@@ -35,12 +35,9 @@ USE_TZ = True
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024
 CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 
-# Enabled only after the approved Frienden release is verified.
-FRIENDOM_ENABLED = True
-# Public Frienden metadata verified profile email + the exact existing callback.
-FRIENDOM_EMAIL_ENABLED = True
-FRIENDOM_CLIENT_ID = 'supervision-local'
-FRIENDOM_CALLBACK_URL = 'http://127.0.0.1:8001/api/auth/friendom/callback/'
+# Retired identity-provider OAuth flags, retained only for legacy avatar data.
+FRIENDOM_ENABLED = False
+FRIENDOM_EMAIL_ENABLED = False
 FRONTEND_ORIGIN = ''
 CHRONELLE_ENABLED = False
 CHRONELLE_AUTH_ENABLED = False
@@ -58,11 +55,7 @@ LOGGING = {
     'loggers': {'django.server': {'handlers': ['local_console'], 'level': 'INFO', 'propagate': False}},
 }
 
-# Frozen space OAuth contract. Off until the provider and client capability are approved.
+# Frienden accounts connect through the ordinary backend API.
 FRIENDEN_SPACE_OAUTH_ENABLED = False
-
 FRIENDEN_SPACE_METADATA_ENABLED = False
-
-# Chat is local-only until provider release and precise client approval.
-FRIENDEN_CHAT_ENABLED = False
 CHAT_VAULT_DIR = PRIVATE_DATA_DIR / 'chat-vault'

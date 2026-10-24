@@ -65,7 +65,7 @@ class GroupLifecycleTests(TestCase):
         self.assertTrue(ResearchGroup.objects.filter(pk=self.a.pk).exists())
     def test_delete_permanently_cascades_owned_content_and_preserves_shared_resources(self):
         group_id=self.a.pk;task_id=self.task.pk;meeting_id=self.meeting.pk
-        with patch('core.calendar_service.calendar_adapter') as calendar, patch('core.friendom.http_transport') as provider:
+        with patch('core.calendar_service.calendar_adapter') as calendar, patch('core.frienden_api.call') as provider:
             response=self.post(self.body())
             self.assertEqual(response.status_code,200);calendar.assert_not_called();provider.assert_not_called()
         self.assertFalse(ResearchGroup.objects.filter(pk=group_id).exists())
@@ -173,24 +173,9 @@ class GroupLifecycleTests(TestCase):
         self.assertNotIn('group_oauth_pending',self.client.session)
         self.assertNotIn('group_oauth_completed',self.client.session)
         self.assertIn('friendom_pending',self.client.session)
-    def test_earlier_join_in_another_browser_cannot_undo_exit_but_new_join_can(self):
+    def test_retired_callback_cannot_undo_exit(self):
         self.client.force_login(self.student)
-        host={'HTTP_HOST':'127.0.0.1:8001'}
-        frozen={'request_id':'r'*43,'expires_in':1800,'authorization_url':'https://frienden.jyonn.space/oauth/authorize?request_id='+'r'*43}
-        profile={'subject':'sermo:123:2','space_id':123,'name':'虚构学生','verified_email':self.student.email}
-        def begin():
-            with patch('core.group_join.http_transport',return_value=frozen), patch('django.conf.settings.FRIENDEN_SPACE_OAUTH_ENABLED',True):
-                r=self.client.post('/api/join/'+self.token+'/',{'consent':True},content_type='application/json',**host)
-                self.assertEqual(r.status_code,200)
-            return self.client.session['group_oauth_pending']
-        def finish(pending):
-            with patch('core.group_join.approved_adapter') as factory, patch('django.conf.settings.FRIENDEN_SPACE_OAUTH_ENABLED',True):
-                factory.return_value.complete.return_value=profile
-                return self.client.get('/api/auth/friendom/callback/',{'state':pending['state'],'code':'c'*43},**host)
-        pending=begin()
-        other=Client();other.force_login(self.student)
-        self.assertEqual(other.post(f'/api/groups/{self.a.pk}/lifecycle/',self.body('leave'),content_type='application/json').status_code,200)
-        self.assertIn('join_error',finish(pending).url)
+        self.assertEqual(self.post(self.body('leave')).status_code,200)
+        response=self.client.get('/api/auth/friendom/callback/',{'state':'old-state','code':'old-code'})
+        self.assertEqual(response.status_code,404)
         self.assertFalse(Membership.objects.filter(group=self.a,user=self.student).exists())
-        self.assertIn('group='+str(self.a.pk),finish(begin()).url)
-        self.assertTrue(Membership.objects.filter(group=self.a,user=self.student).exists())

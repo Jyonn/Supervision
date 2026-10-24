@@ -1,9 +1,25 @@
-# Supervision：本地账号与演示原型
+# Supervision / 板凳：科研记录与研究组协作
 
-- 真实账号版：http://127.0.0.1:8001 （Django / DRF，邮箱注册登录、会话、账号数据与组权限）
-- 独立演示版：http://127.0.0.1:4173 （虚构人物与浏览器本地数据，不是认证系统）
+## 当前开发版本：Frienden 普通账户接入（2026-10-24）
 
-账号版运行、功能边界与 Frienden 接入前置条件见 [ACCOUNT.md](ACCOUNT.md)。两个端口的数据互不导入。4173 页面顶部“本地账号”可打开 8001。
+本次开发版本已移除 Frienden OAuth 登录、回调、授权与委托聊天接口。使用 Supervision 自己的邮箱账号登录；Frienden 账户仅在研究组内连接，不负责登录或创建 Supervision 账号。
+
+- 导师创建研究组时提供空间 slug、官方账户昵称和密码。后端通过 `/users/me` 的 `official` 与 `/spaces/me` 的 `official_user.user_id` 双重核验官方身份。
+- 学生先登录 Supervision，再通过邀请提供对应空间的个人账户昵称和密码。空间由邀请固定，不能选择其他空间或借用官方账户。
+- 使用 `/spaces/join` 的 `new_user_intent=check` 模式，只连接已有账户；密码不保存，access/refresh token 只在服务器私有 vault 加密保存并刷新。
+- 聊天采用与当前工作区一致的暖色、列表和细分隔线，无消息气泡。支持本组已有会话、组员私聊、文字发送、历史分页、近期记录轮询与手动同步。群会话须已在 Frienden 建立，且当前参与者均属于本研究组；空间全员群和投稿会话不展示。
+- 原 OAuth 凭据不会转换成普通账户凭据。现有账号、任务和研究组数据保留；成员需要重新连接对应空间账户。旧 OAuth 专属 Supervision 账号如果没有可用的邮箱/密码，需先解决 Supervision 本身的登录，系统不会按昵称自动合并身份。
+- 不包含好友申请、群管理、建群、媒体上传或自动发送科研记录。头像中既有 Frienden 缓存属于历史资料，不会触发 OAuth。
+
+本版本已通过隔离验证；实际发布状态见交付记录。验证未使用真实用户的 Frienden 账号。运行与历史交付记录见 [ACCOUNT.md](ACCOUNT.md)；普通账户协议与验证说明见 [CHAT-LOCAL.md](CHAT-LOCAL.md)。
+
+```sh
+npm run start:accounts
+npm test
+npm run test:accounts
+```
+
+以下为独立 4173 演示原型的历史说明，不代表真实账号版的认证或当前聊天协议。
 
 # 演示原型说明
 

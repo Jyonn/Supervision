@@ -33,19 +33,13 @@ if not PRIVATE_DATA_DIR.is_absolute():
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': PRIVATE_DATA_DIR / 'supervision.sqlite3'}}
 CALENDAR_VAULT_DIR = PRIVATE_DATA_DIR / 'calendar-vault'
 MAIL_CONFIG_PATH = Path('/etc/supervision/notificator.private.json')
-FRIENDOM_CLIENT_ID = os.environ.get('SUPERVISION_FRIENDEN_CLIENT_ID', '')
-FRIENDOM_CALLBACK_URL = PUBLIC_API_ORIGIN + '/api/auth/friendom/callback/'
-FRIENDOM_ENABLED = os.environ.get('SUPERVISION_FRIENDEN_ENABLED') == '1' and FRIENDOM_CLIENT_ID == 'supervision-web'
-FRIENDOM_EMAIL_ENABLED = FRIENDOM_ENABLED
 from .deployment_config import chronelle_config
 globals().update(chronelle_config(os.environ))
 
-# Approved 2026-10-18: supervision-web administrator proof, registry audit 14.
-# This only enables initiation; every mentor/student still authorizes personally.
-FRIENDEN_SPACE_OAUTH_ENABLED = FRIENDOM_ENABLED and FRIENDOM_EMAIL_ENABLED
-
-FRIENDEN_SPACE_METADATA_ENABLED = FRIENDEN_SPACE_OAUTH_ENABLED
-
-# Approved two-domain rollout; opt-in only after provider/client readiness verification.
-FRIENDEN_CHAT_ENABLED = os.environ.get('SUPERVISION_FRIENDEN_CHAT_ENABLED') == '1'
+# Ordinary Frienden accounts use the production-local encrypted vault.
+# OAuth configuration is no longer consumed, including old environment flags.
+FRIENDOM_ENABLED = False
+FRIENDOM_EMAIL_ENABLED = False
+FRIENDEN_SPACE_OAUTH_ENABLED = False
+FRIENDEN_SPACE_METADATA_ENABLED = True
 CHAT_VAULT_DIR = PRIVATE_DATA_DIR / 'chat-vault'

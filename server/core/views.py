@@ -34,7 +34,7 @@ def user_json(user):
 
 @require_http_methods(['GET'])
 def session(request):
-    return JsonResponse({'user': user_json(request.user) if request.user.is_authenticated else None, 'csrf': get_token(request), 'email_verification': mail_verification.ready(), 'email_verification_required': settings.EMAIL_VERIFICATION_REQUIRED, 'password_recovery': False, 'external_identity': settings.FRIENDOM_ENABLED, 'friendom_email': settings.FRIENDOM_EMAIL_ENABLED, 'frienden_collaboration': bool(getattr(settings,'FRIENDEN_CHAT_ENABLED',False) and settings.FRIENDEN_SPACE_OAUTH_ENABLED and settings.FRIENDOM_CLIENT_ID=='supervision-web'), 'calendar_local': True, 'calendar_authorization': settings.CHRONELLE_AUTH_ENABLED, 'calendar_sync': settings.CHRONELLE_ENABLED})
+    return JsonResponse({'user': user_json(request.user) if request.user.is_authenticated else None, 'csrf': get_token(request), 'email_verification': mail_verification.ready(), 'email_verification_required': settings.EMAIL_VERIFICATION_REQUIRED, 'password_recovery': False, 'external_identity': False, 'friendom_email': False, 'frienden_collaboration': True, 'calendar_local': True, 'calendar_authorization': settings.CHRONELLE_AUTH_ENABLED, 'calendar_sync': settings.CHRONELLE_ENABLED})
 
 @csrf_protect
 @require_http_methods(['POST'])
@@ -293,7 +293,7 @@ def profile(request):
             raise APIValidationError('邮箱来源无效')
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
             raise APIValidationError('姓名长度应为 1–80 个字符')
-        if source == 'friendom' and not (settings.FRIENDOM_ENABLED and FriendomIdentity.objects.filter(user=user).exclude(avatar_url='').exists()):
+        if source == 'friendom' and not (FriendomIdentity.objects.filter(user=user).exclude(avatar_url='').exists()):
             return Response({'detail': '请先连接 Frienden 友间并确认已设置头像'}, status=503)
         if source not in ['preset', 'gravatar', 'friendom'] or type(preset) is not int or not 0 <= preset < 36:
             raise APIValidationError('头像选择无效')
@@ -308,131 +308,3 @@ def profile(request):
 def preset_avatar(request, preset):
     from .preset_avatars import preset_avatar_response
     return preset_avatar_response(preset)
-
-
-@require_http_methods(['GET'])
-def friendom_start(request):
-    if not settings.FRIENDOM_ENABLED:
-        return JsonResponse({'error': 'Frienden 友间客户端发布尚未验证'}, status=503)
-    if request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
-        return HttpResponseRedirect(settings.FRIENDOM_CALLBACK_URL.replace('/callback/', '/start/'))
-    from .friendom import approved_adapter
-    destination, pending = approved_adapter().begin(scopes=('profile', 'email') if settings.FRIENDOM_EMAIL_ENABLED else ('profile',))
-    pending.update({'expires': time.time() + 300, 'user_id': request.user.pk if request.user.is_authenticated else None})
-    request.session.pop('chat_oauth_pending', None)
-    request.session.pop('group_oauth_pending', None)
-    request.session['friendom_pending'] = pending
-    return HttpResponseRedirect(destination)
-
-@csrf_protect
-@require_http_methods(['POST'])
-def friendom_email_start(request):
-    if not settings.FRIENDOM_ENABLED or not settings.FRIENDOM_EMAIL_ENABLED:
-        return JsonResponse({'error': 'Frienden 友间邮箱权限尚待服务端上线核验；现有登录不受影响。'}, status=503)
-    if not request.user.is_authenticated or request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
-        return JsonResponse({'error': '请在本机账号中操作'}, status=403)
-    identity = FriendomIdentity.objects.filter(user=request.user).first()
-    if not identity:
-        return JsonResponse({'error': '请先连接 Frienden 友间身份'}, status=400)
-    try:
-        data = payload(request)
-        if set(data) != {'external_consent'} or data.get('external_consent') is not True:
-            raise ValidationError('需要明确同意邮箱授权和 Gravatar 跨站连接')
-    except ValidationError:
-        return JsonResponse({'error': '请先勾选隐私说明'}, status=400)
-    from .friendom import approved_adapter
-    destination, pending = approved_adapter().begin(scopes=('profile', 'email'))
-    pending.update({'expires': time.time() + 300, 'user_id': request.user.pk,
-                    'purpose': 'gravatar_email', 'subject': identity.subject})
-    request.session.pop('chat_oauth_pending', None)
-    request.session.pop('group_oauth_pending', None)
-    request.session['friendom_pending'] = pending
-    return JsonResponse({'authorize_url': destination})
-
-@require_http_methods(['GET'])
-@sensitive_variables('pending', 'profile')
-def friendom_callback(request):
-    from . import chat_views
-    if 'chat_oauth_pending' in request.session:
-        return chat_views.callback(request)
-    chat_completed = chat_views.completed_callback(request)
-    if chat_completed is not None:
-        return chat_completed
-    from .group_join import completed_callback
-    completed = completed_callback(request)
-    if completed is not None:
-        return completed
-    if 'group_oauth_pending' in request.session:
-        from .group_join import callback
-        return callback(request)
-    # Consume before validation: one callback attempt per pending flow.
-    pending = request.session.pop('friendom_pending', None)
-    def failure():
-        return HttpResponseRedirect(settings.FRONTEND_ORIGIN + '/?friendom_error=1')
-    if not settings.FRIENDOM_ENABLED or request.get_host() != urlsplit(settings.FRIENDOM_CALLBACK_URL).netloc:
-        return failure()
-    if not pending or pending.get('expires', 0) < time.time() or request.GET.get('error'):
-        return failure()
-    if any(len(request.GET.getlist(k)) != 1 for k in ['code', 'state']):
-        return failure()
-    if pending.get('user_id') is not None and (not request.user.is_authenticated or request.user.pk != pending['user_id']):
-        return failure()
-    from .friendom import approved_adapter, FriendomError
-    try:
-        email_flow = pending.get('purpose') == 'gravatar_email'
-        if email_flow and not settings.FRIENDOM_EMAIL_ENABLED:
-            return failure()
-        profile = approved_adapter().complete(code=request.GET['code'], state=request.GET['state'], pending=pending)
-        with transaction.atomic():
-            identity = FriendomIdentity.objects.select_related('user').filter(subject=profile['subject']).first()
-            from .models import SpaceIdentity
-            space_identity = SpaceIdentity.objects.select_related('user').filter(subject=profile['subject']).first()
-            if not email_flow and identity is None and space_identity:
-                user = space_identity.user
-                if not user.is_active or (pending.get('user_id') is not None and pending['user_id'] != user.pk):
-                    raise FriendomError('Identity belongs to a different local account')
-                if not request.user.is_authenticated:
-                    login_with_fixed_expiry(request, user, backend='django.contrib.auth.backends.ModelBackend')
-                return HttpResponseRedirect(settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/')
-            if email_flow:
-                if not identity or identity.user_id != request.user.pk or profile['subject'] != pending.get('subject'):
-                    raise FriendomError('Email grant must match the connected identity')
-                digest = profile.get('gravatar_email_hash', '')
-                if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
-                    raise FriendomError('No verified provider email')
-                identity.gravatar_email_hash = digest
-                identity.gravatar_email_received_at = timezone.now()
-                identity.save(update_fields=['gravatar_email_hash', 'gravatar_email_received_at'])
-                return HttpResponseRedirect((settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/') + '?friendom_email=ready')
-            if pending.get('user_id') is not None:
-                user = request.user
-                if identity and identity.user_id != user.pk:
-                    raise FriendomError('Identity belongs to a different local account')
-                existing = FriendomIdentity.objects.filter(user=user).first()
-                if existing and existing.subject != profile['subject']:
-                    raise FriendomError('Different Frienden 友间 identity already connected')
-            elif identity:
-                user = identity.user
-                if not user.is_active:
-                    raise FriendomError('Local account inactive')
-            else:
-                user = User(username=uuid.uuid4().hex, email=None, first_name=profile['name'])
-                user.set_unusable_password()
-                user.save()
-            if identity is None:
-                identity = FriendomIdentity.objects.create(user=user, subject=profile['subject'], avatar_url=profile['avatar_url'])
-            else:
-                identity.avatar_url = profile['avatar_url']
-                identity.save(update_fields=['avatar_url'])
-            if profile['avatar_url']:
-                user.avatar_source = 'friendom'
-                user.save(update_fields=['avatar_source'])
-        digest = profile.get('gravatar_email_hash', '')
-        if 'email' in pending.get('scopes', []) and len(digest) == 64 and all(c in '0123456789abcdef' for c in digest):
-            identity.gravatar_email_hash = digest
-            identity.gravatar_email_received_at = timezone.now()
-            identity.save(update_fields=['gravatar_email_hash', 'gravatar_email_received_at'])
-        login_with_fixed_expiry(request, user, backend='django.contrib.auth.backends.ModelBackend')
-        return HttpResponseRedirect(settings.FRONTEND_ORIGIN + '/' if settings.FRONTEND_ORIGIN else '/app/')
-    except (FriendomError, IntegrityError, ValueError, KeyError):
-        return failure()
